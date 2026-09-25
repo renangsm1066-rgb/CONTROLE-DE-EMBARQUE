@@ -40,9 +40,20 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .hint{font-size:.75rem;color:var(--muted);margin-top:6px}
 .warn{color:#b3261e;font-weight:600}
+#loginOverlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;padding:16px}
+#loginOverlay .card{max-width:320px;width:100%}
 </style>
 </head>
 <body>
+<div id="loginOverlay">
+  <div class="card">
+    <strong>Acesso ao app</strong>
+    <label>Senha da equipe</label>
+    <input id="loginPass" type="password" placeholder="Digite a senha">
+    <div class="hint warn" id="loginError" style="display:none">Senha incorreta.</div>
+    <button id="loginBtn">Entrar</button>
+  </div>
+</div>
 <h1>Embarque em Lote — leitura por destino (conectado ao Supabase)</h1>
 <div class="wrap">
 
@@ -114,6 +125,26 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
 const SUPABASE_URL = "https://wtfbpttbrhqdzqshfoia.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1cav_qF2u4yUjCRfEx-cvA_3OXSPoUq";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const APP_PASSWORD = "Gsm@2026";
+function checkLogin(){
+  if(localStorage.getItem("gsm_auth") === "ok"){
+    document.getElementById("loginOverlay").style.display = "none";
+  }
+}
+document.getElementById("loginBtn").onclick = ()=>{
+  const val = document.getElementById("loginPass").value;
+  if(val === APP_PASSWORD){
+    localStorage.setItem("gsm_auth", "ok");
+    document.getElementById("loginOverlay").style.display = "none";
+  } else {
+    document.getElementById("loginError").style.display = "block";
+  }
+};
+document.getElementById("loginPass").addEventListener("keydown", e=>{
+  if(e.key === "Enter") document.getElementById("loginBtn").click();
+});
+checkLogin();
 
 const DEVOLUCAO_KEY = "DEVOLUÇÃO MATRIZ";
 let mode = "embarque";
