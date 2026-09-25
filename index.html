@@ -128,6 +128,10 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
       <div><label>De</label><input id="devFiltroDe" type="date"></div>
       <div><label>Até</label><input id="devFiltroAte" type="date"></div>
     </div>
+    <div class="row">
+      <div><label>Hora de</label><input id="devHoraDe" type="time"></div>
+      <div><label>Hora até</label><input id="devHoraAte" type="time"></div>
+    </div>
     <div class="actions">
       <button id="genDevolucaoPdf">Gerar romaneio de devolução (PDF)</button>
       <button id="genDevolucaoCsv" class="secondary">Baixar CSV</button>
@@ -508,15 +512,18 @@ document.getElementById("genCsv").onclick = async ()=>{
   await saveFile("romaneios.csv", csv, "text/csv");
 };
 
-function coletarDevolucaoPorPeriodo(de, ate){
+function coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte){
   const itens = [];
   Object.entries(groups).forEach(([destino, g])=>{
     if(g.modo !== "devolucao") return;
     g.malas.forEach(m=>{
       const d = new Date(m.ts);
       const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+      const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
       if(de && dia<de) return;
       if(ate && dia>ate) return;
+      if(horaDe && hora<horaDe) return;
+      if(horaAte && hora>horaAte) return;
       itens.push({codigo:m.codigo, desc:m.desc, base:destino, ts:m.ts, romaneio:g.numero, lacre:g.lacre});
     });
   });
@@ -529,14 +536,16 @@ document.getElementById("genDevolucaoPdf").onclick = async ()=>{
     if(!window.jspdf || !window.jspdf.jsPDF){ alert("A biblioteca de PDF não carregou. Verifique sua internet."); return; }
     const de = document.getElementById("devFiltroDe").value;
     const ate = document.getElementById("devFiltroAte").value;
-    const itens = coletarDevolucaoPorPeriodo(de, ate);
+    const horaDe = document.getElementById("devHoraDe").value;
+    const horaAte = document.getElementById("devHoraAte").value;
+    const itens = coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte);
     if(itens.length===0){ alert("Nenhuma mala de devolução encontrada nesse período."); return; }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     let y=15;
     doc.setFontSize(14); doc.text("Romaneio de Devolução à Matriz",14,y); y+=10;
     doc.setFontSize(10);
-    doc.text(`Período: ${de||"início"} até ${ate||"hoje"}`,14,y); y+=6;
+    doc.text(`Período: ${de||"início"} até ${ate||"hoje"}${(horaDe||horaAte)?` — horário: ${horaDe||"00:00"} às ${horaAte||"23:59"}`:""}`,14,y); y+=6;
     doc.text(`Emitido em: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
     doc.text(`Total de malas: ${itens.length}`,14,y); y+=10;
     doc.setFontSize(9);
@@ -576,7 +585,9 @@ document.getElementById("genDevolucaoPdf").onclick = async ()=>{
 document.getElementById("genDevolucaoCsv").onclick = async ()=>{
   const de = document.getElementById("devFiltroDe").value;
   const ate = document.getElementById("devFiltroAte").value;
-  const itens = coletarDevolucaoPorPeriodo(de, ate);
+  const horaDe = document.getElementById("devHoraDe").value;
+  const horaAte = document.getElementById("devHoraAte").value;
+  const itens = coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte);
   const rows = [["Romaneio","Origem","Código da mala","Cliente","Lacre","Data/Hora"]];
   itens.forEach(it=>rows.push([it.romaneio, it.base, it.codigo, it.desc, it.lacre, fmtTs(it.ts)]));
   const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
