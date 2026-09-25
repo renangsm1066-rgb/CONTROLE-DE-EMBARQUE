@@ -219,7 +219,7 @@ async function logEvent(tipo, destino, detalhe){
 
 async function getOrCreateRomaneio(modo, destino, origem, responsavel){
   if(groups[destino] && !groups[destino].finalizado) return groups[destino];
-  const numero = romaneioNumero(destino==DEVOLUCAO_KEY ? "MATRIZ" : destino);
+  const numero = romaneioNumero(destino);
   const { data, error } = await sb.from("romaneios").insert({
     numero, modo, destino, origem: origem||null, responsavel: responsavel||null, lacre:"", finalizado:false
   }).select().single();
@@ -234,7 +234,7 @@ function setMode(m){
   document.getElementById("modeEmbarque").className = mode==="embarque" ? "" : "secondary";
   document.getElementById("modeDevolucao").className = mode==="devolucao" ? "" : "secondary";
   document.getElementById("modeInfo").textContent = mode==="devolucao"
-    ? "Modo Devolução Matriz: aceita qualquer código, sem travar por destino."
+    ? "Modo Devolução Matriz: aceita qualquer código, mas trava a leitura em uma base de origem por vez (mesma regra do modo Embarque)."
     : "Modo Embarque: leitura travada em um destino por vez.";
   renderDestinoInfo();
 }
@@ -244,12 +244,13 @@ document.getElementById("modeDevolucao").onclick = ()=> setMode("devolucao");
 function renderDestinoInfo(){
   const info = document.getElementById("destinoAtivoInfo");
   const btn = document.getElementById("concluirDestinoBtn");
-  if(mode === "devolucao"){ info.textContent=""; btn.style.display="none"; return; }
   if(activeDestino){
-    info.textContent = `Lendo para o destino: ${activeDestino}. Códigos de outros destinos serão bloqueados.`;
+    info.textContent = mode==="devolucao"
+      ? `Lendo para a base: ${activeDestino}. Códigos de outras bases serão bloqueados.`
+      : `Lendo para o destino: ${activeDestino}. Códigos de outros destinos serão bloqueados.`;
     btn.style.display = "inline-block";
   } else {
-    info.textContent = "Nenhum destino ativo — a próxima leitura define o destino.";
+    info.textContent = "Nenhuma base ativa — a próxima leitura define a base.";
     btn.style.display = "none";
   }
 }
@@ -275,17 +276,19 @@ scanInput.addEventListener("keydown", async e=>{
   const origem = document.getElementById("origem").value;
   const responsavel = document.getElementById("responsavel").value;
 
-  const destinoKey = mode==="devolucao" ? DEVOLUCAO_KEY : base;
+  const destinoKey = base;
 
-  if(mode==="embarque" && activeDestino && activeDestino !== base){
+  if(activeDestino && activeDestino !== base){
     beep(180,350);
-    const msg = `Mala ${codigo} não pertence ao destino ativo (${activeDestino}) — ela é de "${base}". Leitura não registrada.`;
+    const msg = mode==="devolucao"
+      ? `Mala ${codigo} não pertence à base ativa (${activeDestino}) — ela é de "${base}". Leitura não registrada.`
+      : `Mala ${codigo} não pertence ao destino ativo (${activeDestino}) — ela é de "${base}". Leitura não registrada.`;
     scanFeedback.textContent = msg; scanFeedback.classList.add("warn");
     alert("⚠️ " + msg);
     return;
   }
   scanFeedback.classList.remove("warn");
-  if(mode==="embarque" && !activeDestino) activeDestino = base;
+  if(!activeDestino) activeDestino = base;
 
   const g = await getOrCreateRomaneio(mode, destinoKey, mode==="devolucao"?null:origem, responsavel);
   if(!g) return;
@@ -375,11 +378,11 @@ function renderGroups(){
     const div = document.createElement("div");
     div.className = "card group";
     div.innerHTML = `
-      <h3>${isDevolucao ? "Devolução para Matriz" : "Destino: "+destino} — ${g.malas.length} malas ${(!isDevolucao && activeDestino!==destino) ? `<span class="del" data-resume="${destino}" style="color:var(--accent)">retomar leitura</span>` : ""} <span class="del" data-rmgroup="${destino}">excluir grupo</span></h3>
+      <h3>${isDevolucao ? "Devolução para Matriz — origem: "+destino : "Destino: "+destino} — ${g.malas.length} malas ${activeDestino!==destino ? `<span class="del" data-resume="${destino}" style="color:var(--accent)">retomar leitura</span>` : ""} <span class="del" data-rmgroup="${destino}">excluir grupo</span></h3>
       <label>Número do romaneio</label>
       <input data-numero="${destino}" type="text" value="${g.numero}">
-      <div class="tblwrap"><table><thead><tr><th>Código</th><th>Cliente</th><th>${isDevolucao?"Origem":""}</th><th>Data/Hora</th><th></th></tr></thead>
-      <tbody>${g.malas.map(m=>`<tr><td>${m.codigo}</td><td>${m.desc}</td><td>${isDevolucao?(m.origemBase||""):""}</td><td>${fmtTs(m.ts)}</td><td><span class="del" data-rm="${destino}|${m.codigo}">x</span></td></tr>`).join("")}</tbody></table></div>
+      <div class="tblwrap"><table><thead><tr><th>Código</th><th>Cliente</th><th>Data/Hora</th><th></th></tr></thead>
+      <tbody>${g.malas.map(m=>`<tr><td>${m.codigo}</td><td>${m.desc}</td><td>${fmtTs(m.ts)}</td><td><span class="del" data-rm="${destino}|${m.codigo}">x</span></td></tr>`).join("")}</tbody></table></div>
       <label>Número do lacre</label>
       <input data-lacre="${destino}" type="text" value="${g.lacre}" placeholder="Número do lacre">
       <label>Foto da embalagem</label>
@@ -459,18 +462,17 @@ document.getElementById("genPdf").onclick = async ()=>{
       doc.setFontSize(10);
       doc.text(`Número: ${g.numero}`,14,y); y+=6;
       doc.text(`Data/hora: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
-      if(isDevolucao){ doc.text("Origem: diversas bases (ver detalhe por mala)",14,y); y+=6; doc.text("Destino: Matriz",14,y); y+=6; }
+      if(isDevolucao){ doc.text(`Origem: ${destino}`,14,y); y+=6; doc.text("Destino: Matriz",14,y); y+=6; }
       else { doc.text(`Origem: ${origem||"-"}`,14,y); y+=6; doc.text(`Destino: ${destino}`,14,y); y+=6; }
       doc.text(`Responsável: ${responsavel||"-"}`,14,y); y+=6;
       doc.text(`Número do lacre: ${g.lacre||"-"}`,14,y); y+=6;
       doc.text(`Total de volumes: ${g.malas.length}`,14,y); y+=10;
-      doc.setFontSize(9); doc.text("Código",14,y); doc.text(isDevolucao?"Origem":"Cliente",70,y); if(isDevolucao) doc.text("Cliente",120,y); y+=4;
+      doc.setFontSize(9); doc.text("Código",14,y); doc.text("Cliente",70,y); y+=4;
       doc.line(14,y,196,y); y+=4;
       g.malas.forEach(m=>{
         if(y>270){ doc.addPage(); y=15; }
         doc.text(String(m.codigo),14,y);
-        if(isDevolucao){ doc.text(String(m.origemBase||""),70,y); doc.text(String(m.desc).slice(0,45),120,y); }
-        else { doc.text(String(m.desc).slice(0,55),70,y); }
+        doc.text(String(m.desc).slice(0,55),70,y);
         y+=5;
       });
       if(g.foto){ y+=6; try{ doc.addImage(g.foto,"JPEG",14,y,60,60); }catch(e){} }
@@ -486,7 +488,7 @@ document.getElementById("genCsv").onclick = async ()=>{
   Object.entries(groups).forEach(([destino,g])=>{
     const isDevolucao = g.modo==="devolucao";
     g.malas.forEach(m=>{
-      rows.push([g.numero, isDevolucao?"Devolução":"Embarque", isDevolucao?(m.origemBase||""):origem, isDevolucao?"Matriz":destino, responsavel, g.lacre, m.codigo, m.desc]);
+      rows.push([g.numero, isDevolucao?"Devolução":"Embarque", isDevolucao?destino:origem, isDevolucao?"Matriz":destino, responsavel, g.lacre, m.codigo, m.desc]);
     });
   });
   const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
