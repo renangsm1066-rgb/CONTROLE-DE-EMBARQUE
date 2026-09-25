@@ -121,6 +121,19 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
     <button id="genLogCsv" class="secondary">Baixar relatório (CSV)</button>
   </div>
 
+  <div class="card">
+    <strong>Comprovante de Devolução à Matriz</strong>
+    <div class="hint">Reúne todas as malas com movimentação de devolução no período, para assinatura de entrega.</div>
+    <div class="row">
+      <div><label>De</label><input id="devFiltroDe" type="date"></div>
+      <div><label>Até</label><input id="devFiltroAte" type="date"></div>
+    </div>
+    <div class="actions">
+      <button id="genDevolucaoPdf">Gerar romaneio de devolução (PDF)</button>
+      <button id="genDevolucaoCsv" class="secondary">Baixar CSV</button>
+    </div>
+  </div>
+
   <div class="card actions">
     <button id="genPdf">Gerar romaneios (PDF)</button>
     <button id="genCsv" class="secondary">Baixar CSV das malas</button>
@@ -493,6 +506,81 @@ document.getElementById("genCsv").onclick = async ()=>{
   });
   const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
   await saveFile("romaneios.csv", csv, "text/csv");
+};
+
+function coletarDevolucaoPorPeriodo(de, ate){
+  const itens = [];
+  Object.entries(groups).forEach(([destino, g])=>{
+    if(g.modo !== "devolucao") return;
+    g.malas.forEach(m=>{
+      const d = new Date(m.ts);
+      const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+      if(de && dia<de) return;
+      if(ate && dia>ate) return;
+      itens.push({codigo:m.codigo, desc:m.desc, base:destino, ts:m.ts, romaneio:g.numero, lacre:g.lacre});
+    });
+  });
+  itens.sort((a,b)=>a.ts-b.ts);
+  return itens;
+}
+
+document.getElementById("genDevolucaoPdf").onclick = async ()=>{
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){ alert("A biblioteca de PDF não carregou. Verifique sua internet."); return; }
+    const de = document.getElementById("devFiltroDe").value;
+    const ate = document.getElementById("devFiltroAte").value;
+    const itens = coletarDevolucaoPorPeriodo(de, ate);
+    if(itens.length===0){ alert("Nenhuma mala de devolução encontrada nesse período."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    let y=15;
+    doc.setFontSize(14); doc.text("Romaneio de Devolução à Matriz",14,y); y+=10;
+    doc.setFontSize(10);
+    doc.text(`Período: ${de||"início"} até ${ate||"hoje"}`,14,y); y+=6;
+    doc.text(`Emitido em: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
+    doc.text(`Total de malas: ${itens.length}`,14,y); y+=10;
+    doc.setFontSize(9);
+    doc.text("Código",14,y); doc.text("Cliente",62,y); doc.text("Origem",128,y); doc.text("Data/Hora",162,y); y+=4;
+    doc.line(14,y,196,y); y+=4;
+    itens.forEach(it=>{
+      if(y>255){
+        doc.addPage(); y=15;
+        doc.setFontSize(9);
+        doc.text("Código",14,y); doc.text("Cliente",62,y); doc.text("Origem",128,y); doc.text("Data/Hora",162,y); y+=4;
+        doc.line(14,y,196,y); y+=4;
+      }
+      doc.text(String(it.codigo),14,y);
+      doc.text(String(it.desc).slice(0,32),62,y);
+      doc.text(String(it.base).slice(0,18),128,y);
+      doc.text(fmtTs(it.ts),162,y);
+      y+=5;
+    });
+    y+=20;
+    if(y>250){ doc.addPage(); y=30; }
+    doc.setFontSize(10);
+    doc.line(14,y,90,y);
+    doc.line(120,y,196,y);
+    y+=5;
+    doc.text("Assinatura do Expedidor",14,y);
+    doc.text("Recebimento na Matriz",120,y);
+    y+=12;
+    doc.text("Nome: ______________________________",14,y);
+    doc.text("Nome: ______________________________",120,y);
+    y+=8;
+    doc.text("Data: ____/____/________",14,y);
+    doc.text("Data: ____/____/________",120,y);
+    await saveFile("romaneio-devolucao-matriz.pdf", doc.output("blob"), "application/pdf");
+  }catch(e){ alert("Erro ao gerar o PDF: "+e.message); }
+};
+
+document.getElementById("genDevolucaoCsv").onclick = async ()=>{
+  const de = document.getElementById("devFiltroDe").value;
+  const ate = document.getElementById("devFiltroAte").value;
+  const itens = coletarDevolucaoPorPeriodo(de, ate);
+  const rows = [["Romaneio","Origem","Código da mala","Cliente","Lacre","Data/Hora"]];
+  itens.forEach(it=>rows.push([it.romaneio, it.base, it.codigo, it.desc, it.lacre, fmtTs(it.ts)]));
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  await saveFile("romaneio-devolucao-matriz.csv", csv, "text/csv");
 };
 
 document.getElementById("refreshBtn").onclick = loadAll;
