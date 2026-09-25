@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Embarque em Lote</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f7f7f5; --card:#fff; --ink:#1f1f1f; --muted:#6b6b6b; --line:#e4e2dd;
+  --accent:#b5651d; --accent-ink:#fff;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --bg:#171614; --card:#211f1c; --ink:#f2f0ec; --muted:#a9a49c; --line:#3a362f; }
+}
+:root[data-theme="dark"]{ --bg:#171614; --card:#211f1c; --ink:#f2f0ec; --muted:#a9a49c; --line:#3a362f; }
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+h1{font-size:1.1rem;padding:14px 16px 0;margin:0}
+.wrap{max-width:680px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:.78rem;color:var(--muted);margin:8px 0 3px}
+input,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font-size:.9rem}
+button{margin-top:12px;padding:9px 14px;border:none;border-radius:7px;background:var(--accent);color:var(--accent-ink);font-size:.88rem;cursor:pointer}
+button.secondary{background:transparent;border:1px solid var(--line);color:var(--ink)}
+button.small{padding:5px 9px;font-size:.78rem;margin-top:0}
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+.tblwrap{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:8px}
+th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
+.empty{color:var(--muted);font-size:.85rem;padding:6px 0}
+.group{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px}
+.group h3{margin:0 0 6px;font-size:.95rem}
+.row{display:flex;gap:8px}
+.row>div{flex:1}
+.thumb{max-width:100px;max-height:100px;border-radius:6px;margin-top:6px;display:block}
+.del{color:#b3261e;cursor:pointer;font-size:.75rem}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.hint{font-size:.75rem;color:var(--muted);margin-top:6px}
+.warn{color:#b3261e;font-weight:600}
+</style>
+</head>
+<body>
+<h1>Embarque em Lote — leitura por destino (conectado ao Supabase)</h1>
+<div class="wrap">
+
+  <div class="card" id="summaryCard">
+    <div class="row" style="text-align:center">
+      <div><div style="font-size:1.4rem;font-weight:600" id="sumMalas">0</div><div class="hint">Malas lidas</div></div>
+      <div><div style="font-size:1.4rem;font-weight:600" id="sumDestinos">0</div><div class="hint">Destinos</div></div>
+      <div><div style="font-size:1.4rem;font-weight:600" id="sumPendentes">0</div><div class="hint">Sem lacre/foto</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Modo de leitura</strong>
+    <div class="actions">
+      <button id="modeEmbarque">Embarque (por destino)</button>
+      <button id="modeDevolucao" class="secondary">Devolução Matriz</button>
+    </div>
+    <div class="hint" id="modeInfo"></div>
+  </div>
+
+  <div class="card">
+    <strong>Base de códigos</strong>
+    <div class="hint" id="baseInfo">Carregando...</div>
+    <label>Atualizar planilha (.xlsx ou .csv) — colunas: Código, Base, Descrição do cliente</label>
+    <input id="baseFile" type="file" accept=".xlsx,.xls,.csv">
+    <button id="baseUpdateBtn" class="secondary small">Atualizar base no Supabase</button>
+  </div>
+
+  <div class="card">
+    <strong>Dados do embarque</strong>
+    <div class="row">
+      <div><label>Origem</label><input id="origem" type="text" placeholder="Ex: São Paulo - CD"></div>
+      <div><label>Responsável</label><input id="responsavel" type="text" placeholder="Nome do responsável"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Leitura das malas</strong>
+    <div class="hint" id="destinoAtivoInfo"></div>
+    <input id="scanInput" type="text" placeholder="Código da mala" autofocus>
+    <div class="hint" id="scanFeedback"></div>
+    <button id="concluirDestinoBtn" class="secondary small" style="display:none">Concluir destino atual</button>
+  </div>
+
+  <div id="groupsWrap"></div>
+
+  <div class="card">
+    <strong>Relatório de movimentação</strong>
+    <div class="hint">Histórico de leituras e alterações de lacre, com data e horário, por destino.</div>
+    <div class="row">
+      <div><label>De</label><input id="logFiltroDe" type="date"></div>
+      <div><label>Até</label><input id="logFiltroAte" type="date"></div>
+    </div>
+    <div class="tblwrap" style="max-height:260px">
+      <table><thead><tr><th>Data/Hora</th><th>Destino</th><th>Evento</th><th>Detalhe</th></tr></thead>
+      <tbody id="logBody"></tbody></table>
+    </div>
+    <button id="genLogCsv" class="secondary">Baixar relatório (CSV)</button>
+  </div>
+
+  <div class="card actions">
+    <button id="genPdf">Gerar romaneios (PDF)</button>
+    <button id="genCsv" class="secondary">Baixar CSV das malas</button>
+    <button id="refreshBtn" class="secondary">Atualizar dados do banco</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://wtfbpttbrhqdzqshfoia.supabase.co";
+const SUPABASE_KEY = "sb_publishable_1cav_qF2u4yUjCRfEx-cvA_3OXSPoUq";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const DEVOLUCAO_KEY = "DEVOLUÇÃO MATRIZ";
+let mode = "embarque";
+let activeDestino = null;
+let groups = {};   // key: destino -> { id, numero, lacre, foto_url, finalizado, finalizado_em, malas: [...] }
+let log = [];
+let malasBaseCount = 0;
+
+function fmtTs(ts){ return new Date(ts).toLocaleString("pt-BR"); }
+function romaneioNumero(base){
+  const d = new Date();
+  const stamp = d.getFullYear().toString().slice(2)+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");
+  return "ROM-"+stamp+"-"+base.replace(/\s+/g,"").slice(0,6).toUpperCase();
+}
+function beep(freq=880, duration=110){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.frequency.value = freq; osc.type = "sine";
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.start(); osc.stop(ctx.currentTime + duration/1000);
+    osc.onended = ()=> ctx.close();
+  }catch(e){}
+}
+
+async function saveFile(filename, data, mime){
+  const blob = data instanceof Blob ? data : new Blob([data], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ---------- Carregar dados do Supabase ----------
+async function loadAll(){
+  const { count } = await sb.from("malas_base").select("*", {count:"exact", head:true});
+  malasBaseCount = count || 0;
+  document.getElementById("baseInfo").textContent = `${malasBaseCount} códigos carregados no Supabase.`;
+
+  const { data: romaneios } = await sb.from("romaneios").select("*").order("criado_em", {ascending:true});
+  groups = {};
+  for(const r of (romaneios||[])){
+    const { data: leituras } = await sb.from("leituras").select("*").eq("romaneio_id", r.id).order("criado_em", {ascending:true});
+    groups[r.destino] = {
+      id: r.id, numero: r.numero, modo: r.modo, lacre: r.lacre||"", foto: r.foto_url||"",
+      finalizado: r.finalizado, finalizadoEm: r.finalizado_em,
+      malas: (leituras||[]).map(l=>({codigo:l.codigo, desc:l.descricao, origemBase:l.origem_base, ts: new Date(l.criado_em).getTime()}))
+    };
+  }
+  const { data: mov } = await sb.from("movimentacao").select("*").order("criado_em", {ascending:false}).limit(2000);
+  log = (mov||[]).map(m=>({ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe}));
+  render();
+}
+
+async function logEvent(tipo, destino, detalhe){
+  await sb.from("movimentacao").insert({tipo, destino, detalhe});
+  log.unshift({ts: Date.now(), tipo, base:destino, detalhe});
+}
+
+async function getOrCreateRomaneio(modo, destino, origem, responsavel){
+  if(groups[destino] && !groups[destino].finalizado) return groups[destino];
+  const numero = romaneioNumero(destino==DEVOLUCAO_KEY ? "MATRIZ" : destino);
+  const { data, error } = await sb.from("romaneios").insert({
+    numero, modo, destino, origem: origem||null, responsavel: responsavel||null, lacre:"", finalizado:false
+  }).select().single();
+  if(error){ alert("Erro ao criar romaneio: "+error.message); return null; }
+  groups[destino] = { id:data.id, numero:data.numero, modo, lacre:"", foto:"", finalizado:false, finalizadoEm:null, malas:[] };
+  return groups[destino];
+}
+
+// ---------- Modo ----------
+function setMode(m){
+  mode = m;
+  document.getElementById("modeEmbarque").className = mode==="embarque" ? "" : "secondary";
+  document.getElementById("modeDevolucao").className = mode==="devolucao" ? "" : "secondary";
+  document.getElementById("modeInfo").textContent = mode==="devolucao"
+    ? "Modo Devolução Matriz: aceita qualquer código, sem travar por destino."
+    : "Modo Embarque: leitura travada em um destino por vez.";
+  renderDestinoInfo();
+}
+document.getElementById("modeEmbarque").onclick = ()=> setMode("embarque");
+document.getElementById("modeDevolucao").onclick = ()=> setMode("devolucao");
+
+function renderDestinoInfo(){
+  const info = document.getElementById("destinoAtivoInfo");
+  const btn = document.getElementById("concluirDestinoBtn");
+  if(mode === "devolucao"){ info.textContent=""; btn.style.display="none"; return; }
+  if(activeDestino){
+    info.textContent = `Lendo para o destino: ${activeDestino}. Códigos de outros destinos serão bloqueados.`;
+    btn.style.display = "inline-block";
+  } else {
+    info.textContent = "Nenhum destino ativo — a próxima leitura define o destino.";
+    btn.style.display = "none";
+  }
+}
+document.getElementById("concluirDestinoBtn").onclick = ()=>{ activeDestino = null; renderDestinoInfo(); };
+
+// ---------- Leitura ----------
+const scanInput = document.getElementById("scanInput");
+const scanFeedback = document.getElementById("scanFeedback");
+
+scanInput.addEventListener("keydown", async e=>{
+  if(e.key !== "Enter") return;
+  const codigo = scanInput.value.trim();
+  scanInput.value = "";
+  if(!codigo) return;
+
+  const { data: hit } = await sb.from("malas_base").select("base,descricao").eq("codigo", codigo).maybeSingle();
+  if(!hit){
+    beep(220,260);
+    scanFeedback.textContent = `Código "${codigo}" não encontrado na base.`;
+    return;
+  }
+  const base = hit.base, desc = hit.descricao;
+  const origem = document.getElementById("origem").value;
+  const responsavel = document.getElementById("responsavel").value;
+
+  const destinoKey = mode==="devolucao" ? DEVOLUCAO_KEY : base;
+
+  if(mode==="embarque" && activeDestino && activeDestino !== base){
+    beep(180,350);
+    const msg = `Mala ${codigo} não pertence ao destino ativo (${activeDestino}) — ela é de "${base}". Leitura não registrada.`;
+    scanFeedback.textContent = msg; scanFeedback.classList.add("warn");
+    alert("⚠️ " + msg);
+    return;
+  }
+  scanFeedback.classList.remove("warn");
+  if(mode==="embarque" && !activeDestino) activeDestino = base;
+
+  const g = await getOrCreateRomaneio(mode, destinoKey, mode==="devolucao"?null:origem, responsavel);
+  if(!g) return;
+  if(g.finalizado){
+    beep(180,350);
+    scanFeedback.textContent = `Carregamento para "${destinoKey}" já finalizado. Reabra antes de continuar.`;
+    return;
+  }
+  if(g.malas.some(m=>m.codigo===codigo)){
+    beep(660,90);
+    scanFeedback.textContent = `Mala ${codigo} já lida (${destinoKey}).`;
+    return;
+  }
+  beep(1200,90);
+  const origemBase = mode==="devolucao" ? base : null;
+  await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:origemBase});
+  g.malas.push({codigo, desc, origemBase, ts: Date.now()});
+  await logEvent("leitura", destinoKey, `${codigo} — ${desc}`);
+  scanFeedback.textContent = mode==="devolucao" ? `Mala ${codigo} (origem: ${base}) → Devolução Matriz.` : `Mala ${codigo} → ${base}.`;
+  render();
+});
+
+// ---------- Renderização ----------
+function updateSummary(){
+  const keys = Object.keys(groups);
+  let totalMalas=0, pendentes=0;
+  keys.forEach(k=>{ const g=groups[k]; totalMalas+=g.malas.length; if(!g.lacre||!g.foto) pendentes++; });
+  document.getElementById("sumMalas").textContent = totalMalas;
+  document.getElementById("sumDestinos").textContent = keys.length;
+  document.getElementById("sumPendentes").textContent = pendentes;
+}
+
+async function setLacre(destino, lacre){
+  const g = groups[destino];
+  g.lacre = lacre;
+  await sb.from("romaneios").update({lacre}).eq("id", g.id);
+  await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`);
+}
+async function setNumero(destino, numero){
+  const g = groups[destino];
+  g.numero = numero;
+  await sb.from("romaneios").update({numero}).eq("id", g.id);
+}
+async function setFoto(destino, dataUrl){
+  const g = groups[destino];
+  g.foto = dataUrl;
+  await sb.from("romaneios").update({foto_url: dataUrl}).eq("id", g.id);
+}
+async function finalizarGrupo(destino){
+  const g = groups[destino];
+  g.finalizado = true; g.finalizadoEm = Date.now();
+  await sb.from("romaneios").update({finalizado:true, finalizado_em: new Date().toISOString()}).eq("id", g.id);
+  if(activeDestino===destino) activeDestino=null;
+  await logEvent("finalizacao", destino, "");
+  render();
+}
+async function reabrirGrupo(destino){
+  const g = groups[destino];
+  g.finalizado = false; g.finalizadoEm = null;
+  await sb.from("romaneios").update({finalizado:false, finalizado_em:null}).eq("id", g.id);
+  await logEvent("reabertura", destino, "");
+  render();
+}
+async function removerMala(destino, codigo){
+  const g = groups[destino];
+  const mala = g.malas.find(m=>m.codigo===codigo);
+  g.malas = g.malas.filter(m=>m.codigo!==codigo);
+  await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", codigo);
+  render();
+}
+async function removerGrupo(destino){
+  const g = groups[destino];
+  await sb.from("romaneios").delete().eq("id", g.id);
+  delete groups[destino];
+  if(activeDestino===destino) activeDestino=null;
+  render();
+}
+
+const groupsWrap = document.getElementById("groupsWrap");
+function renderGroups(){
+  const keys = Object.keys(groups);
+  if(keys.length===0){ groupsWrap.innerHTML = `<div class="card"><div class="empty">Nenhuma mala lida ainda.</div></div>`; return; }
+  groupsWrap.innerHTML = "";
+  keys.forEach(destino=>{
+    const g = groups[destino];
+    const isDevolucao = g.modo === "devolucao";
+    const div = document.createElement("div");
+    div.className = "card group";
+    div.innerHTML = `
+      <h3>${isDevolucao ? "Devolução para Matriz" : "Destino: "+destino} — ${g.malas.length} malas ${(!isDevolucao && activeDestino!==destino) ? `<span class="del" data-resume="${destino}" style="color:var(--accent)">retomar leitura</span>` : ""} <span class="del" data-rmgroup="${destino}">excluir grupo</span></h3>
+      <label>Número do romaneio</label>
+      <input data-numero="${destino}" type="text" value="${g.numero}">
+      <div class="tblwrap"><table><thead><tr><th>Código</th><th>Cliente</th><th>${isDevolucao?"Origem":""}</th><th>Data/Hora</th><th></th></tr></thead>
+      <tbody>${g.malas.map(m=>`<tr><td>${m.codigo}</td><td>${m.desc}</td><td>${isDevolucao?(m.origemBase||""):""}</td><td>${fmtTs(m.ts)}</td><td><span class="del" data-rm="${destino}|${m.codigo}">x</span></td></tr>`).join("")}</tbody></table></div>
+      <label>Número do lacre</label>
+      <input data-lacre="${destino}" type="text" value="${g.lacre}" placeholder="Número do lacre">
+      <label>Foto da embalagem</label>
+      <input data-foto="${destino}" type="file" accept="image/*" capture="environment">
+      ${g.foto ? `<img class="thumb" src="${g.foto}">` : ""}
+      ${g.finalizado
+        ? `<div class="hint">Carregamento finalizado em ${fmtTs(g.finalizadoEm)}. <span class="del" data-reabrir="${destino}" style="color:var(--accent)">reabrir</span></div>`
+        : `<button data-finalizar="${destino}" class="secondary">Finalizar carregamento</button>`}
+    `;
+    groupsWrap.appendChild(div);
+  });
+  groupsWrap.querySelectorAll("[data-rm]").forEach(el=>{ el.onclick=()=>{ const [b,c]=el.dataset.rm.split("|"); removerMala(b,c); }; });
+  groupsWrap.querySelectorAll("[data-rmgroup]").forEach(el=>{ el.onclick=()=>removerGrupo(el.dataset.rmgroup); });
+  groupsWrap.querySelectorAll("[data-resume]").forEach(el=>{ el.onclick=()=>{ activeDestino=el.dataset.resume; renderDestinoInfo(); }; });
+  groupsWrap.querySelectorAll("[data-numero]").forEach(el=>{ el.onchange=()=>setNumero(el.dataset.numero, el.value); });
+  groupsWrap.querySelectorAll("[data-lacre]").forEach(el=>{ el.onchange=()=>{ setLacre(el.dataset.lacre, el.value).then(renderLog); }; });
+  groupsWrap.querySelectorAll("[data-finalizar]").forEach(el=>{ el.onclick=()=>finalizarGrupo(el.dataset.finalizar); });
+  groupsWrap.querySelectorAll("[data-reabrir]").forEach(el=>{ el.onclick=()=>reabrirGrupo(el.dataset.reabrir); });
+  groupsWrap.querySelectorAll("[data-foto]").forEach(el=>{
+    el.onchange = ()=>{
+      const destino = el.dataset.foto; const file = el.files[0];
+      if(!file) return;
+      const r = new FileReader();
+      r.onload = ()=>{ setFoto(destino, r.result).then(render); };
+      r.readAsDataURL(file);
+    };
+  });
+}
+
+function eventoLabel(tipo){
+  return {leitura:"Leitura de mala", lacre:"Lacre", finalizacao:"Finalização de carregamento", reabertura:"Reabertura de carregamento"}[tipo] || tipo;
+}
+function filtrarLogPorData(entries){
+  const de = document.getElementById("logFiltroDe").value;
+  const ate = document.getElementById("logFiltroAte").value;
+  return entries.filter(e=>{
+    const d = new Date(e.ts);
+    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    if(de && dia<de) return false;
+    if(ate && dia>ate) return false;
+    return true;
+  });
+}
+function renderLog(){
+  const body = document.getElementById("logBody");
+  const filtrados = filtrarLogPorData(log).sort((a,b)=>b.ts-a.ts);
+  body.innerHTML = filtrados.map(e=>`<tr><td>${fmtTs(e.ts)}</td><td>${e.base}</td><td>${eventoLabel(e.tipo)}</td><td>${e.detalhe||"-"}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="empty">Nenhuma movimentação no período.</td></tr>`;
+}
+document.getElementById("logFiltroDe").onchange = renderLog;
+document.getElementById("logFiltroAte").onchange = renderLog;
+document.getElementById("genLogCsv").onclick = async ()=>{
+  const rows=[["Data/Hora","Destino","Evento","Detalhe"]];
+  filtrarLogPorData(log).sort((a,b)=>a.ts-b.ts).forEach(e=>rows.push([fmtTs(e.ts), e.base, eventoLabel(e.tipo), e.detalhe||"-"]));
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  await saveFile("relatorio-movimentacao.csv", csv, "text/csv");
+};
+
+function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderLog(); }
+
+// ---------- PDF / CSV das malas ----------
+document.getElementById("genPdf").onclick = async ()=>{
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){ alert("A biblioteca de PDF não carregou. Verifique sua internet."); return; }
+    const origem = document.getElementById("origem").value;
+    const responsavel = document.getElementById("responsavel").value;
+    const keys = Object.keys(groups);
+    if(keys.length===0){ alert("Nenhuma mala lida ainda."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    keys.forEach((destino, idx)=>{
+      const g = groups[destino];
+      const isDevolucao = g.modo === "devolucao";
+      if(idx>0) doc.addPage();
+      let y=15;
+      doc.setFontSize(14); doc.text(isDevolucao?"Romaneio de Devolução à Matriz":"Romaneio de Transferência",14,y); y+=10;
+      doc.setFontSize(10);
+      doc.text(`Número: ${g.numero}`,14,y); y+=6;
+      doc.text(`Data/hora: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
+      if(isDevolucao){ doc.text("Origem: diversas bases (ver detalhe por mala)",14,y); y+=6; doc.text("Destino: Matriz",14,y); y+=6; }
+      else { doc.text(`Origem: ${origem||"-"}`,14,y); y+=6; doc.text(`Destino: ${destino}`,14,y); y+=6; }
+      doc.text(`Responsável: ${responsavel||"-"}`,14,y); y+=6;
+      doc.text(`Número do lacre: ${g.lacre||"-"}`,14,y); y+=6;
+      doc.text(`Total de volumes: ${g.malas.length}`,14,y); y+=10;
+      doc.setFontSize(9); doc.text("Código",14,y); doc.text(isDevolucao?"Origem":"Cliente",70,y); if(isDevolucao) doc.text("Cliente",120,y); y+=4;
+      doc.line(14,y,196,y); y+=4;
+      g.malas.forEach(m=>{
+        if(y>270){ doc.addPage(); y=15; }
+        doc.text(String(m.codigo),14,y);
+        if(isDevolucao){ doc.text(String(m.origemBase||""),70,y); doc.text(String(m.desc).slice(0,45),120,y); }
+        else { doc.text(String(m.desc).slice(0,55),70,y); }
+        y+=5;
+      });
+      if(g.foto){ y+=6; try{ doc.addImage(g.foto,"JPEG",14,y,60,60); }catch(e){} }
+    });
+    await saveFile("romaneios-transferencia.pdf", doc.output("blob"), "application/pdf");
+  }catch(e){ alert("Erro ao gerar o PDF: "+e.message); }
+};
+
+document.getElementById("genCsv").onclick = async ()=>{
+  const origem = document.getElementById("origem").value;
+  const responsavel = document.getElementById("responsavel").value;
+  const rows=[["Romaneio","Tipo","Origem","Destino","Responsável","Lacre","Código da mala","Cliente"]];
+  Object.entries(groups).forEach(([destino,g])=>{
+    const isDevolucao = g.modo==="devolucao";
+    g.malas.forEach(m=>{
+      rows.push([g.numero, isDevolucao?"Devolução":"Embarque", isDevolucao?(m.origemBase||""):origem, isDevolucao?"Matriz":destino, responsavel, g.lacre, m.codigo, m.desc]);
+    });
+  });
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  await saveFile("romaneios.csv", csv, "text/csv");
+};
+
+document.getElementById("refreshBtn").onclick = loadAll;
+
+// ---------- Atualizar base de códigos ----------
+document.getElementById("baseUpdateBtn").onclick = async ()=>{
+  const file = document.getElementById("baseFile").files[0];
+  if(!file){ alert("Selecione um arquivo primeiro."); return; }
+  if(typeof XLSX === "undefined"){ alert("A biblioteca de planilhas não carregou. Verifique sua internet."); return; }
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:"array"});
+    const sheetName = wb.SheetNames.includes("MALAS") ? "MALAS" : wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, raw:false});
+    const registros = [];
+    for(let i=1;i<rows.length;i++){
+      const r = rows[i];
+      if(!r || r[0]==null || r[0]==="") continue;
+      registros.push({ codigo:String(r[0]).trim(), base:r[1]!=null?String(r[1]).trim():"", descricao:r[2]!=null?String(r[2]).trim():"" });
+    }
+    for(let i=0;i<registros.length;i+=500){
+      const lote = registros.slice(i,i+500);
+      const { error } = await sb.from("malas_base").upsert(lote, {onConflict:"codigo"});
+      if(error){ alert("Erro ao importar: "+error.message); return; }
+    }
+    alert(`Base atualizada: ${registros.length} códigos enviados ao Supabase.`);
+    loadAll();
+  }catch(e){
+    alert("Não foi possível ler o arquivo. Verifique as colunas: Código, Base, Descrição do cliente.");
+  }
+};
+
+loadAll();
+setMode("embarque");
+</script>
+</body>
+</html>
