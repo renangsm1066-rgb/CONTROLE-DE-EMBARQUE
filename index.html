@@ -130,6 +130,25 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </div>
 
   <div class="card">
+    <strong>Romaneio de Transferência (por base)</strong>
+    <div class="hint">Gera o romaneio de uma base de destino específica, filtrando por período.</div>
+    <label>Base de destino</label>
+    <select id="embBaseSelect"><option value="">Selecione a base</option></select>
+    <div class="row">
+      <div><label>De</label><input id="embFiltroDe" type="date"></div>
+      <div><label>Até</label><input id="embFiltroAte" type="date"></div>
+    </div>
+    <div class="row">
+      <div><label>Hora de</label><input id="embHoraDe" type="time"></div>
+      <div><label>Hora até</label><input id="embHoraAte" type="time"></div>
+    </div>
+    <div class="actions">
+      <button id="genEmbarquePdf">Gerar romaneio de transferência (PDF)</button>
+      <button id="genEmbarqueCsv" class="secondary">Baixar CSV</button>
+    </div>
+  </div>
+
+  <div class="card">
     <strong>Comprovante de Devolução à Matriz</strong>
     <div class="hint">Reúne todas as malas com movimentação de devolução no período, para assinatura de entrega.</div>
     <div class="row">
@@ -233,14 +252,18 @@ async function loadAll(){
       malas: (leituras||[]).map(l=>({codigo:l.codigo, desc:l.descricao, origemBase:l.origem_base, ts: new Date(l.criado_em).getTime()}))
     };
   }
-  const { data: mov } = await sb.from("movimentacao").select("*").order("criado_em", {ascending:false}).limit(2000);
-  log = (mov||[]).map(m=>({ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe}));
+  const { data: mov } = await sb.from("movimentacao").select("*").order("criado_em", {ascending:false}).limit(5000);
+  log = (mov||[]).map(m=>({
+    ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe,
+    modo:m.modo, codigo:m.codigo, descricao:m.descricao, origemBase:m.origem_base
+  }));
   render();
 }
 
-async function logEvent(tipo, destino, detalhe){
-  await sb.from("movimentacao").insert({tipo, destino, detalhe});
-  log.unshift({ts: Date.now(), tipo, base:destino, detalhe});
+async function logEvent(tipo, destino, detalhe, extra){
+  extra = extra || {};
+  await sb.from("movimentacao").insert({tipo, destino, detalhe, modo:extra.modo||null, codigo:extra.codigo||null, descricao:extra.descricao||null, origem_base:extra.origemBase||null});
+  log.unshift({ts: Date.now(), tipo, base:destino, detalhe, modo:extra.modo||null, codigo:extra.codigo||null, descricao:extra.descricao||null, origemBase:extra.origemBase||null});
 }
 
 async function getOrCreateRomaneio(modo, destino, origem, responsavel, lacreInicial){
@@ -349,7 +372,7 @@ scanInput.addEventListener("keydown", async e=>{
     beep(1200,90);
     await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base});
     g.malas.push({codigo, desc, origemBase:base, ts: Date.now()});
-    await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`);
+    await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
     scanFeedback.textContent = `Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`;
     render();
     return;
@@ -382,7 +405,7 @@ scanInput.addEventListener("keydown", async e=>{
   beep(1200,90);
   await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null});
   g.malas.push({codigo, desc, origemBase:null, ts: Date.now()});
-  await logEvent("leitura", destinoKey, `${codigo} — ${desc}`);
+  await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
   scanFeedback.textContent = `Mala ${codigo} → ${base}.`;
   render();
 });
@@ -517,7 +540,7 @@ document.getElementById("genLogCsv").onclick = async ()=>{
   await saveFile("relatorio-movimentacao.csv", csv, "text/csv");
 };
 
-function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderLog(); }
+function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderLog(); popularSelectBases(); }
 
 // ---------- PDF / CSV das malas ----------
 document.getElementById("genPdf").onclick = async ()=>{
@@ -574,20 +597,116 @@ document.getElementById("genCsv").onclick = async ()=>{
   await saveFile("romaneios.csv", csv, "text/csv");
 };
 
+function popularSelectBases(){
+  const sel = document.getElementById("embBaseSelect");
+  const atual = sel.value;
+  const bases = Object.keys(groups).filter(d=>groups[d].modo==="embarque").sort();
+  sel.innerHTML = `<option value="">Selecione a base</option>` + bases.map(b=>`<option value="${b}">${b} (${groups[b].malas.length} malas)</option>`).join("");
+  if(bases.includes(atual)) sel.value = atual;
+}
+
+function coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte){
+  const itens = [];
+  log.forEach(e=>{
+    if(e.tipo !== "leitura" || e.modo !== "embarque") return;
+    if(baseSelecionada && e.base !== baseSelecionada) return;
+    const d = new Date(e.ts);
+    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+    if(de && dia<de) return;
+    if(ate && dia>ate) return;
+    if(horaDe && hora<horaDe) return;
+    if(horaAte && hora>horaAte) return;
+    const g = groups[e.base];
+    itens.push({codigo:e.codigo, desc:e.descricao, destino:e.base, ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
+  });
+  itens.sort((a,b)=>a.ts-b.ts);
+  return itens;
+}
+
+document.getElementById("genEmbarquePdf").onclick = async ()=>{
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){ alert("A biblioteca de PDF não carregou. Verifique sua internet."); return; }
+    const baseSelecionada = document.getElementById("embBaseSelect").value;
+    if(!baseSelecionada){ alert("Selecione uma base de destino."); return; }
+    const de = document.getElementById("embFiltroDe").value;
+    const ate = document.getElementById("embFiltroAte").value;
+    const horaDe = document.getElementById("embHoraDe").value;
+    const horaAte = document.getElementById("embHoraAte").value;
+    const itens = coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte);
+    if(itens.length===0){ alert("Nenhuma mala encontrada para essa base nesse período."); return; }
+    const g = groups[baseSelecionada];
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    let y=15;
+    doc.setFontSize(14); doc.text("Romaneio de Transferência",14,y); y+=10;
+    doc.setFontSize(10);
+    doc.text(`Número: ${g.numero}`,14,y); y+=6;
+    doc.text(`Destino: ${baseSelecionada}`,14,y); y+=6;
+    doc.text(`Número do lacre: ${g.lacre||"-"}`,14,y); y+=6;
+    doc.text(`Período: ${de||"início"} até ${ate||"hoje"}${(horaDe||horaAte)?` — horário: ${horaDe||"00:00"} às ${horaAte||"23:59"}`:""}`,14,y); y+=6;
+    doc.text(`Emitido em: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
+    doc.text(`Total de malas: ${itens.length}`,14,y); y+=10;
+    doc.setFontSize(9);
+    doc.text("Código",14,y); doc.text("Cliente",65,y); doc.text("Data/Hora",160,y); y+=4;
+    doc.line(14,y,196,y); y+=4;
+    itens.forEach(it=>{
+      if(y>255){
+        doc.addPage(); y=15;
+        doc.setFontSize(9);
+        doc.text("Código",14,y); doc.text("Cliente",65,y); doc.text("Data/Hora",160,y); y+=4;
+        doc.line(14,y,196,y); y+=4;
+      }
+      doc.text(String(it.codigo),14,y);
+      doc.text(String(it.desc).slice(0,45),65,y);
+      doc.text(fmtTs(it.ts),160,y);
+      y+=5;
+    });
+    y+=20;
+    if(y>250){ doc.addPage(); y=30; }
+    doc.setFontSize(10);
+    doc.line(14,y,90,y);
+    doc.line(120,y,196,y);
+    y+=5;
+    doc.text("Assinatura do Expedidor",14,y);
+    doc.text("Recebimento na Filial",120,y);
+    y+=12;
+    doc.text("Nome: ______________________________",14,y);
+    doc.text("Nome: ______________________________",120,y);
+    y+=8;
+    doc.text("Data: ____/____/________",14,y);
+    doc.text("Data: ____/____/________",120,y);
+    await saveFile(`romaneio-transferencia-${baseSelecionada}.pdf`, doc.output("blob"), "application/pdf");
+  }catch(e){ alert("Erro ao gerar o PDF: "+e.message); }
+};
+
+document.getElementById("genEmbarqueCsv").onclick = async ()=>{
+  const baseSelecionada = document.getElementById("embBaseSelect").value;
+  if(!baseSelecionada){ alert("Selecione uma base de destino."); return; }
+  const de = document.getElementById("embFiltroDe").value;
+  const ate = document.getElementById("embFiltroAte").value;
+  const horaDe = document.getElementById("embHoraDe").value;
+  const horaAte = document.getElementById("embHoraAte").value;
+  const itens = coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte);
+  const rows = [["Romaneio","Destino","Código da mala","Cliente","Lacre","Data/Hora"]];
+  itens.forEach(it=>rows.push([it.romaneio, it.destino, it.codigo, it.desc, it.lacre, fmtTs(it.ts)]));
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  await saveFile("romaneio-entrega-filial.csv", csv, "text/csv");
+};
+
 function coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte){
   const itens = [];
-  Object.entries(groups).forEach(([destino, g])=>{
-    if(g.modo !== "devolucao") return;
-    g.malas.forEach(m=>{
-      const d = new Date(m.ts);
-      const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-      const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
-      if(de && dia<de) return;
-      if(ate && dia>ate) return;
-      if(horaDe && hora<horaDe) return;
-      if(horaAte && hora>horaAte) return;
-      itens.push({codigo:m.codigo, desc:m.desc, base:m.origemBase||"", ts:m.ts, romaneio:g.numero, lacre:g.lacre});
-    });
+  log.forEach(e=>{
+    if(e.tipo !== "leitura" || e.modo !== "devolucao") return;
+    const d = new Date(e.ts);
+    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+    if(de && dia<de) return;
+    if(ate && dia>ate) return;
+    if(horaDe && hora<horaDe) return;
+    if(horaAte && hora>horaAte) return;
+    const g = groups[e.base];
+    itens.push({codigo:e.codigo, desc:e.descricao, base:e.origemBase||"", ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
   });
   itens.sort((a,b)=>a.ts-b.ts);
   return itens;
