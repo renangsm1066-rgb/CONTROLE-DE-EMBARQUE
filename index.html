@@ -129,6 +129,15 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
     <button id="concluirDestinoBtn" class="secondary small" style="display:none">Concluir destino atual</button>
   </div>
 <div id="groupsWrap"></div>
+
+<div class="card">
+  <strong>Lotes finalizados hoje</strong>
+  <div class="hint">Lotes concluídos no dia de hoje. Reabra se precisar corrigir algo.</div>
+  <div class="tblwrap" style="max-height:200px">
+    <table><thead><tr><th>Lote/Destino</th><th>Malas</th><th>Finalizado às</th><th></th></tr></thead>
+    <tbody id="finalizadosHojeBody"></tbody></table>
+  </div>
+</div>
   <div class="card actions">
     <button id="genPdf">Gerar romaneios (PDF)</button>
     <button id="genCsv" class="secondary">Baixar CSV das malas</button>
@@ -576,7 +585,27 @@ document.getElementById("genLogCsv").onclick = async ()=>{
   await saveFile("relatorio-movimentacao.csv", csv, "text/csv");
 };
 
-function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderLog(); popularSelectBases(); }
+function renderFinalizadosHoje(){
+  const body = document.getElementById("finalizadosHojeBody");
+  const hoje = new Date();
+  const diaHoje = hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0")+"-"+String(hoje.getDate()).padStart(2,"0");
+  const finalizados = Object.entries(groups).filter(([k,g])=>{
+    if(!g.finalizado || !g.finalizadoEm) return false;
+    const d = new Date(g.finalizadoEm);
+    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    return dia === diaHoje;
+  }).sort((a,b)=> new Date(b[1].finalizadoEm) - new Date(a[1].finalizadoEm));
+
+  body.innerHTML = finalizados.map(([destino,g])=>
+    `<tr><td>${destino}</td><td>${g.malas.length}</td><td>${fmtTs(g.finalizadoEm)}</td><td><span class="del" data-reabrirhoje="${destino}" style="color:var(--accent)">reabrir</span></td></tr>`
+  ).join("") || `<tr><td colspan="4" class="empty">Nenhum lote finalizado hoje.</td></tr>`;
+
+  body.querySelectorAll("[data-reabrirhoje]").forEach(el=>{
+    el.onclick = ()=> reabrirGrupo(el.dataset.reabrirhoje);
+  });
+}
+
+function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderFinalizadosHoje(); renderLog(); popularSelectBases(); }
 
 // ---------- PDF / CSV das malas ----------
 document.getElementById("genPdf").onclick = async ()=>{
