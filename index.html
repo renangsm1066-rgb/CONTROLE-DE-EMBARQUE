@@ -191,6 +191,8 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
       <div><label>De</label><input id="logFiltroDe" type="date"></div>
       <div><label>Até</label><input id="logFiltroAte" type="date"></div>
     </div>
+    <label>Buscar por código da mala</label>
+    <input id="logFiltroCodigo" type="text" placeholder="Digite o código (ou parte dele)">
     <div class="tblwrap" style="max-height:260px">
       <table><thead><tr><th>Data/Hora</th><th>Destino</th><th>Evento</th><th>Detalhe</th></tr></thead>
       <tbody id="logBody"></tbody></table>
@@ -562,11 +564,16 @@ function eventoLabel(tipo){
 function filtrarLogPorData(entries){
   const de = document.getElementById("logFiltroDe").value;
   const ate = document.getElementById("logFiltroAte").value;
+  const codigoBusca = document.getElementById("logFiltroCodigo").value.trim().toUpperCase();
   return entries.filter(e=>{
     const d = new Date(e.ts);
     const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
     if(de && dia<de) return false;
     if(ate && dia>ate) return false;
+    if(codigoBusca){
+      const alvo = (e.codigo || e.detalhe || "").toUpperCase();
+      if(!alvo.includes(codigoBusca)) return false;
+    }
     return true;
   });
 }
@@ -578,9 +585,10 @@ function renderLog(){
 }
 document.getElementById("logFiltroDe").onchange = renderLog;
 document.getElementById("logFiltroAte").onchange = renderLog;
+document.getElementById("logFiltroCodigo").addEventListener("input", renderLog);
 document.getElementById("genLogCsv").onclick = async ()=>{
-  const rows=[["Data/Hora","Destino","Evento","Detalhe"]];
-  filtrarLogPorData(log).sort((a,b)=>a.ts-b.ts).forEach(e=>rows.push([fmtTs(e.ts), e.base, eventoLabel(e.tipo), e.detalhe||"-"]));
+  const rows=[["Data/Hora","Modo","Destino","Evento","Detalhe"]];
+  filtrarLogPorData(log).sort((a,b)=>a.ts-b.ts).forEach(e=>rows.push([fmtTs(e.ts), modoLabel(e.modo), e.base, eventoLabel(e.tipo), e.detalhe||"-"]));
   const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
   await saveFile("relatorio-movimentacao.csv", csv, "text/csv");
 };
