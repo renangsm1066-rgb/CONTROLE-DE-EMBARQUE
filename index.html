@@ -115,13 +115,6 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </div>
 <div id="leituraFlow" style="display:none">
 <div class="card">
-    <strong>Dados do embarque</strong>
-    <div class="row">
-      <div><label>Origem</label><input id="origem" type="text" placeholder="Ex: São Paulo - CD"></div>
-      <div><label>Responsável</label><input id="responsavel" type="text" placeholder="Nome do responsável"></div>
-    </div>
-  </div>
-<div class="card">
     <strong>Leitura das malas</strong>
     <div id="destinoAtivoInfo" class="status-banner"></div>
     <div id="loteDevolucaoBox" style="display:none">
@@ -225,9 +218,11 @@ const SUPABASE_URL = "https://wtfbpttbrhqdzqshfoia.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1cav_qF2u4yUjCRfEx-cvA_3OXSPoUq";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+let usuarioLogado = "";
 async function checkLogin(){
   const { data: { session } } = await sb.auth.getSession();
   if(session){
+    usuarioLogado = session.user.email || "";
     document.getElementById("loginOverlay").style.display = "none";
   }
 }
@@ -242,6 +237,7 @@ document.getElementById("loginBtn").onclick = async ()=>{
     errEl.style.display = "block";
     return;
   }
+  usuarioLogado = data.user.email || "";
   document.getElementById("loginOverlay").style.display = "none";
 };
 document.getElementById("loginPass").addEventListener("keydown", e=>{
@@ -423,8 +419,8 @@ scanInput.addEventListener("keydown", async e=>{
     return;
   }
   const base = hit.base, desc = hit.descricao;
-  const origem = document.getElementById("origem").value;
-  const responsavel = document.getElementById("responsavel").value;
+  const origem = "";
+  const responsavel = usuarioLogado;
 
   if(mode === "devolucao"){
     if(!activeLote){
@@ -651,8 +647,8 @@ function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderF
 document.getElementById("genPdf").onclick = async ()=>{
   try{
     if(!window.jspdf || !window.jspdf.jsPDF){ alert("A biblioteca de PDF não carregou. Verifique sua internet."); return; }
-    const origem = document.getElementById("origem").value;
-    const responsavel = document.getElementById("responsavel").value;
+    const origem = "";
+    const responsavel = usuarioLogado;
     const keys = Object.keys(groups);
     if(keys.length===0){ alert("Nenhuma mala lida ainda."); return; }
     const { jsPDF } = window.jspdf;
@@ -689,8 +685,8 @@ document.getElementById("genPdf").onclick = async ()=>{
 };
 
 document.getElementById("genCsv").onclick = async ()=>{
-  const origem = document.getElementById("origem").value;
-  const responsavel = document.getElementById("responsavel").value;
+  const origem = "";
+  const responsavel = usuarioLogado;
   const rows=[["Romaneio","Tipo","Origem","Destino","Responsável","Lacre","Código da mala","Cliente"]];
   Object.entries(groups).forEach(([destino,g])=>{
     const isDevolucao = g.modo==="devolucao";
@@ -922,6 +918,7 @@ document.getElementById("genDevolucaoCsv").onclick = async ()=>{
 document.getElementById("refreshBtn").onclick = loadAll;
 async function doLogout(){
   await sb.auth.signOut();
+  usuarioLogado = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 document.getElementById("logoutBtnTop").onclick = doLogout;
