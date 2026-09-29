@@ -698,8 +698,15 @@ function coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte){
     const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
     if(de && dia<de) return;
     if(ate && dia>ate) return;
-    if(horaDe && hora<horaDe) return;
-    if(horaAte && hora>horaAte) return;
+    if(horaDe && horaAte){
+      if(horaDe <= horaAte){
+        if(hora < horaDe || hora > horaAte) return;
+      } else {
+        // intervalo vira a meia-noite (ex: 17:00 até 08:30)
+        if(hora < horaDe && hora > horaAte) return;
+      }
+    } else if(horaDe && hora < horaDe){ return; }
+    else if(horaAte && hora > horaAte){ return; }
     const g = groups[e.base];
     itens.push({codigo:e.codigo, desc:e.descricao, destino:e.base, ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
   });
@@ -787,8 +794,15 @@ function coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte){
     const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
     if(de && dia<de) return;
     if(ate && dia>ate) return;
-    if(horaDe && hora<horaDe) return;
-    if(horaAte && hora>horaAte) return;
+    if(horaDe && horaAte){
+      if(horaDe <= horaAte){
+        if(hora < horaDe || hora > horaAte) return;
+      } else {
+        // intervalo vira a meia-noite (ex: 17:00 até 08:30)
+        if(hora < horaDe && hora > horaAte) return;
+      }
+    } else if(horaDe && hora < horaDe){ return; }
+    else if(horaAte && hora > horaAte){ return; }
     const g = groups[e.base];
     itens.push({codigo:e.codigo, desc:e.descricao, base:e.origemBase||"", ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
   });
