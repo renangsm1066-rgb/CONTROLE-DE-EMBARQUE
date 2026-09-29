@@ -684,29 +684,24 @@ function popularSelectBases(){
   const sel = document.getElementById("embBaseSelect");
   const atual = sel.value;
   const bases = Object.keys(groups).filter(d=>groups[d].modo==="embarque").sort();
-  sel.innerHTML = `<option value="">Selecione a base</option>` + bases.map(b=>`<option value="${b}">${b}</option>`).join("");
-  if(bases.includes(atual)) sel.value = atual;
+  sel.innerHTML = `<option value="">Selecione a base</option><option value="TODAS">Todas as bases (relatório geral)</option>` + bases.map(b=>`<option value="${b}">${b}</option>`).join("");
+  if(atual==="TODAS" || bases.includes(atual)) sel.value = atual;
+}
+
+function dentroDoPeriodo(ts, de, ate, horaDe, horaAte){
+  const inicio = new Date(`${de || "1970-01-01"}T${horaDe || "00:00"}:00`);
+  const fim = new Date(`${ate || "2999-12-31"}T${horaAte || "23:59"}:59`);
+  const d = new Date(ts);
+  return d >= inicio && d <= fim;
 }
 
 function coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte){
+  const filtroBase = (baseSelecionada && baseSelecionada!=="TODAS") ? baseSelecionada : "";
   const itens = [];
   log.forEach(e=>{
     if(e.tipo !== "leitura" || e.modo !== "embarque") return;
-    if(baseSelecionada && e.base !== baseSelecionada) return;
-    const d = new Date(e.ts);
-    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
-    if(de && dia<de) return;
-    if(ate && dia>ate) return;
-    if(horaDe && horaAte){
-      if(horaDe <= horaAte){
-        if(hora < horaDe || hora > horaAte) return;
-      } else {
-        // intervalo vira a meia-noite (ex: 17:00 até 08:30)
-        if(hora < horaDe && hora > horaAte) return;
-      }
-    } else if(horaDe && hora < horaDe){ return; }
-    else if(horaAte && hora > horaAte){ return; }
+    if(filtroBase && e.base !== filtroBase) return;
+    if(!dentroDoPeriodo(e.ts, de, ate, horaDe, horaAte)) return;
     const g = groups[e.base];
     itens.push({codigo:e.codigo, desc:e.descricao, destino:e.base, ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
   });
@@ -724,11 +719,53 @@ document.getElementById("genEmbarquePdf").onclick = async ()=>{
     const horaDe = document.getElementById("embHoraDe").value;
     const horaAte = document.getElementById("embHoraAte").value;
     const itens = coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte);
-    if(itens.length===0){ alert("Nenhuma mala encontrada para essa base nesse período."); return; }
-    const g = groups[baseSelecionada];
+    if(itens.length===0){ alert("Nenhuma mala encontrada nesse período."); return; }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     let y=15;
+    const geral = baseSelecionada === "TODAS";
+
+    if(geral){
+      addLogo(doc); doc.setFontSize(14); doc.text("Relatório Geral de Transferências",14,y); y+=10;
+      doc.setFontSize(10);
+      doc.text(`Período: ${de||"início"} até ${ate||"hoje"}${(horaDe||horaAte)?` — horário: ${horaDe||"00:00"} às ${horaAte||"23:59"}`:""}`,14,y); y+=6;
+      doc.text(`Emitido em: ${new Date().toLocaleString("pt-BR")}`,14,y); y+=6;
+      doc.text(`Total de malas: ${itens.length}`,14,y); y+=10;
+      doc.setFontSize(9);
+      doc.text("Código",14,y); doc.text("Cliente",62,y); doc.text("Destino",128,y); doc.text("Data/Hora",162,y); y+=4;
+      doc.line(14,y,196,y); y+=4;
+      itens.forEach(it=>{
+        if(y>255){
+          doc.addPage(); y=15;
+          doc.setFontSize(9);
+          doc.text("Código",14,y); doc.text("Cliente",62,y); doc.text("Destino",128,y); doc.text("Data/Hora",162,y); y+=4;
+          doc.line(14,y,196,y); y+=4;
+        }
+        doc.text(String(it.codigo),14,y);
+        doc.text(String(it.desc).slice(0,32),62,y);
+        doc.text(String(it.destino).slice(0,18),128,y);
+        doc.text(fmtTs(it.ts),162,y);
+        y+=5;
+      });
+      y+=20;
+      if(y>250){ doc.addPage(); y=30; }
+      doc.setFontSize(10);
+      doc.line(14,y,90,y);
+      doc.line(120,y,196,y);
+      y+=5;
+      doc.text("Assinatura do Expedidor",14,y);
+      doc.text("Recebimento",120,y);
+      y+=12;
+      doc.text("Nome: ______________________________",14,y);
+      doc.text("Nome: ______________________________",120,y);
+      y+=8;
+      doc.text("Data: ____/____/________",14,y);
+      doc.text("Data: ____/____/________",120,y);
+      await saveFile("romaneio-transferencia-geral.pdf", doc.output("blob"), "application/pdf");
+      return;
+    }
+
+    const g = groups[baseSelecionada];
     addLogo(doc); doc.setFontSize(14); doc.text("Romaneio de Transferência",14,y); y+=10;
     doc.setFontSize(10);
     doc.text(`Número: ${g.numero}`,14,y); y+=6;
@@ -789,20 +826,7 @@ function coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte){
   const itens = [];
   log.forEach(e=>{
     if(e.tipo !== "leitura" || e.modo !== "devolucao") return;
-    const d = new Date(e.ts);
-    const dia = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    const hora = String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
-    if(de && dia<de) return;
-    if(ate && dia>ate) return;
-    if(horaDe && horaAte){
-      if(horaDe <= horaAte){
-        if(hora < horaDe || hora > horaAte) return;
-      } else {
-        // intervalo vira a meia-noite (ex: 17:00 até 08:30)
-        if(hora < horaDe && hora > horaAte) return;
-      }
-    } else if(horaDe && hora < horaDe){ return; }
-    else if(horaAte && hora > horaAte){ return; }
+    if(!dentroDoPeriodo(e.ts, de, ate, horaDe, horaAte)) return;
     const g = groups[e.base];
     itens.push({codigo:e.codigo, desc:e.descricao, base:e.origemBase||"", ts:e.ts, romaneio:g?g.numero:"-", lacre:g?g.lacre:""});
   });
