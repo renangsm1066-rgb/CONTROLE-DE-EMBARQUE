@@ -194,7 +194,7 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
     <label>Buscar por código da mala</label>
     <input id="logFiltroCodigo" type="text" placeholder="Digite o código (ou parte dele)">
     <div class="tblwrap" style="max-height:260px">
-      <table><thead><tr><th>Data/Hora</th><th>Destino</th><th>Evento</th><th>Detalhe</th></tr></thead>
+      <table><thead><tr><th>Data/Hora</th><th>Modo</th><th>Destino</th><th>Evento</th><th>Detalhe</th></tr></thead>
       <tbody id="logBody"></tbody></table>
     </div>
     <button id="genLogCsv" class="secondary">Baixar relatório (CSV)</button>
@@ -275,10 +275,19 @@ function addLogo(doc){
 
 async function saveFile(filename, data, mime){
   const blob = data instanceof Blob ? data : new Blob([data], {type:mime});
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if(isIOS){
+    // iOS Safari não suporta forçar download; abre numa aba para o usuário usar "Compartilhar" > "Salvar em Arquivos"
+    const reader = new FileReader();
+    reader.onload = ()=>{ window.open(reader.result, "_blank"); };
+    reader.readAsDataURL(blob);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
 }
 
 // ---------- Carregar dados do Supabase ----------
@@ -558,6 +567,7 @@ function renderGroups(){
   });
 }
 
+function modoLabel(modo){ return modo==="devolucao" ? "Devolução Matriz" : (modo==="embarque" ? "Embarque" : "-"); }
 function eventoLabel(tipo){
   return {leitura:"Leitura de mala", lacre:"Lacre", finalizacao:"Finalização de carregamento", reabertura:"Reabertura de carregamento"}[tipo] || tipo;
 }
@@ -580,8 +590,8 @@ function filtrarLogPorData(entries){
 function renderLog(){
   const body = document.getElementById("logBody");
   const filtrados = filtrarLogPorData(log).sort((a,b)=>b.ts-a.ts);
-  body.innerHTML = filtrados.map(e=>`<tr><td>${fmtTs(e.ts)}</td><td>${e.base}</td><td>${eventoLabel(e.tipo)}</td><td>${e.detalhe||"-"}</td></tr>`).join("")
-    || `<tr><td colspan="4" class="empty">Nenhuma movimentação no período.</td></tr>`;
+  body.innerHTML = filtrados.map(e=>`<tr><td>${fmtTs(e.ts)}</td><td>${modoLabel(e.modo)}</td><td>${e.base}</td><td>${eventoLabel(e.tipo)}</td><td>${e.detalhe||"-"}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">Nenhuma movimentação no período.</td></tr>`;
 }
 document.getElementById("logFiltroDe").onchange = renderLog;
 document.getElementById("logFiltroAte").onchange = renderLog;
