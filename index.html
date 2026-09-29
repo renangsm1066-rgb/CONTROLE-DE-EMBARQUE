@@ -39,6 +39,14 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .hint{font-size:.75rem;color:var(--muted);margin-top:6px}
 .warn{color:#b3261e;font-weight:600}
+.status-banner{display:none;padding:8px 10px;border-radius:8px;font-size:.82rem;margin:8px 0;background:#f3f3f1;color:var(--ink);border:1px solid var(--line)}
+.status-banner.on{display:block;background:#fdecee;color:#8f1626;border-color:#f3c4cb}
+.status-banner.off{display:block;background:#f3f3f1;color:var(--muted)}
+.scan-input{font-size:1.3rem;padding:14px 12px;font-weight:600;text-align:center;letter-spacing:.02em}
+.scan-feedback{min-height:1.4rem;font-size:.95rem;font-weight:600;margin-top:8px;padding:6px 8px;border-radius:6px;transition:opacity .4s}
+.scan-feedback.ok{background:#e9f7ee;color:#1a7a3c}
+.scan-feedback.bad{background:#fdecee;color:#8f1626}
+.scan-feedback.fade{opacity:0}
 #loginOverlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999;padding:16px}
 #loginOverlay .card{max-width:320px;width:100%}
 
@@ -115,17 +123,17 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </div>
 <div class="card">
     <strong>Leitura das malas</strong>
-    <div class="hint" id="destinoAtivoInfo"></div>
+    <div id="destinoAtivoInfo" class="status-banner"></div>
     <div id="loteDevolucaoBox" style="display:none">
       <label>Lacre do lote atual (Devolução Matriz)</label>
-      <input id="loteLacreInput" type="text" placeholder="Número do lacre deste lote">
-      <div class="actions">
-        <button id="iniciarLoteBtn" class="secondary small">Definir lote</button>
-        <button id="concluirLoteBtn" class="secondary small" style="display:none">Concluir lote</button>
+      <div class="row" style="align-items:flex-end">
+        <div><input id="loteLacreInput" type="text" placeholder="Número do lacre deste lote"></div>
+        <div style="flex:none"><button id="iniciarLoteBtn" class="secondary small" style="margin-top:0">Definir lote</button></div>
+        <div style="flex:none"><button id="concluirLoteBtn" class="secondary small" style="display:none;margin-top:0">Concluir lote</button></div>
       </div>
     </div>
-    <input id="scanInput" type="text" placeholder="Código da mala" autofocus>
-    <div class="hint" id="scanFeedback"></div>
+    <input id="scanInput" class="scan-input" type="text" placeholder="Código da mala" autofocus>
+    <div id="scanFeedback" class="scan-feedback"></div>
     <button id="concluirDestinoBtn" class="secondary small" style="display:none">Concluir destino atual</button>
   </div>
 <div id="groupsWrap"></div>
@@ -342,6 +350,7 @@ function setMode(m){
     : "Modo Embarque: leitura travada em um destino por vez.";
   document.getElementById("loteDevolucaoBox").style.display = mode==="devolucao" ? "block" : "none";
   renderDestinoInfo();
+  document.getElementById("scanInput").focus();
 }
 document.getElementById("modeEmbarque").onclick = ()=> setMode("embarque");
 document.getElementById("modeDevolucao").onclick = ()=> setMode("devolucao");
@@ -351,6 +360,7 @@ document.getElementById("iniciarLoteBtn").onclick = ()=>{
   if(!val){ alert("Informe o número do lacre do lote."); return; }
   activeLote = val;
   renderDestinoInfo();
+  document.getElementById("scanInput").focus();
 };
 document.getElementById("concluirLoteBtn").onclick = ()=>{
   activeLote = null;
@@ -366,9 +376,11 @@ function renderDestinoInfo(){
     btn.style.display = "none";
     if(activeLote){
       info.textContent = `Lote de devolução ativo — lacre: ${activeLote}. Qualquer código será aceito, sem travar por base.`;
+      info.className = "status-banner on";
       loteBtn.style.display = "inline-block";
     } else {
       info.textContent = "Nenhum lote definido — informe o lacre acima antes de escanear.";
+      info.className = "status-banner off";
       loteBtn.style.display = "none";
     }
     return;
@@ -376,9 +388,11 @@ function renderDestinoInfo(){
   loteBtn.style.display = "none";
   if(activeDestino){
     info.textContent = `Lendo para o destino: ${activeDestino}. Códigos de outros destinos serão bloqueados.`;
+    info.className = "status-banner on";
     btn.style.display = "inline-block";
   } else {
     info.textContent = "Nenhum destino ativo — a próxima leitura define o destino.";
+    info.className = "status-banner off";
     btn.style.display = "none";
   }
 }
@@ -387,6 +401,14 @@ document.getElementById("concluirDestinoBtn").onclick = ()=>{ activeDestino = nu
 // ---------- Leitura ----------
 const scanInput = document.getElementById("scanInput");
 const scanFeedback = document.getElementById("scanFeedback");
+let feedbackTimer = null;
+function setFeedback(msg, tipo){
+  clearTimeout(feedbackTimer);
+  scanFeedback.classList.remove("ok","bad","fade","warn");
+  scanFeedback.textContent = msg;
+  if(tipo) scanFeedback.classList.add(tipo);
+  feedbackTimer = setTimeout(()=>{ scanFeedback.classList.add("fade"); }, 3000);
+}
 
 scanInput.addEventListener("keydown", async e=>{
   if(e.key !== "Enter") return;
@@ -397,7 +419,7 @@ scanInput.addEventListener("keydown", async e=>{
   const { data: hit } = await sb.from("malas_base").select("base,descricao").eq("codigo", codigo).maybeSingle();
   if(!hit){
     beep(220,260);
-    scanFeedback.textContent = `Código "${codigo}" não encontrado na base.`;
+    setFeedback(`Código "${codigo}" não encontrado na base.`, "bad");
     return;
   }
   const base = hit.base, desc = hit.descricao;
@@ -407,7 +429,7 @@ scanInput.addEventListener("keydown", async e=>{
   if(mode === "devolucao"){
     if(!activeLote){
       beep(180,350);
-      scanFeedback.textContent = "Defina o lacre do lote antes de escanear.";
+      setFeedback("Defina o lacre do lote antes de escanear.", "bad");
       return;
     }
     scanFeedback.classList.remove("warn");
@@ -416,19 +438,19 @@ scanInput.addEventListener("keydown", async e=>{
     if(!g) return;
     if(g.finalizado){
       beep(180,350);
-      scanFeedback.textContent = `Lote "${activeLote}" já finalizado. Reabra antes de continuar.`;
+      setFeedback(`Lote "${activeLote}" já finalizado. Reabra antes de continuar.`, "bad");
       return;
     }
     if(g.malas.some(m=>m.codigo===codigo)){
       beep(660,90);
-      scanFeedback.textContent = `Mala ${codigo} já lida neste lote.`;
+      setFeedback(`Mala ${codigo} já lida neste lote.`, "bad");
       return;
     }
     beep(1200,90);
     await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base});
     g.malas.push({codigo, desc, origemBase:base, ts: Date.now()});
     await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
-    scanFeedback.textContent = `Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`;
+    setFeedback(`Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`, "ok");
     render();
     return;
   }
@@ -438,7 +460,7 @@ scanInput.addEventListener("keydown", async e=>{
   if(activeDestino && activeDestino !== base){
     beep(180,350);
     const msg = `Mala ${codigo} não pertence ao destino ativo (${activeDestino}) — ela é de "${base}". Leitura não registrada.`;
-    scanFeedback.textContent = msg; scanFeedback.classList.add("warn");
+    setFeedback(msg, "bad");
     alert("⚠️ " + msg);
     return;
   }
@@ -449,19 +471,19 @@ scanInput.addEventListener("keydown", async e=>{
   if(!g) return;
   if(g.finalizado){
     beep(180,350);
-    scanFeedback.textContent = `Carregamento para "${destinoKey}" já finalizado. Reabra antes de continuar.`;
+    setFeedback(`Carregamento para "${destinoKey}" já finalizado. Reabra antes de continuar.`, "bad");
     return;
   }
   if(g.malas.some(m=>m.codigo===codigo)){
     beep(660,90);
-    scanFeedback.textContent = `Mala ${codigo} já lida (${destinoKey}).`;
+    setFeedback(`Mala ${codigo} já lida (${destinoKey}).`, "bad");
     return;
   }
   beep(1200,90);
   await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null});
   g.malas.push({codigo, desc, origemBase:null, ts: Date.now()});
   await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
-  scanFeedback.textContent = `Mala ${codigo} → ${base}.`;
+  setFeedback(`Mala ${codigo} → ${base}.`, "ok");
   render();
 });
 
