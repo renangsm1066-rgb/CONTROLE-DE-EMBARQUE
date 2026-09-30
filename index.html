@@ -195,7 +195,7 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
     <label>Buscar por código da mala</label>
     <input id="logFiltroCodigo" type="text" placeholder="Digite o código (ou parte dele)">
     <div class="tblwrap" style="max-height:260px">
-      <table><thead><tr><th>Data/Hora</th><th>Modo</th><th>Destino</th><th>Evento</th><th>Detalhe</th></tr></thead>
+      <table><thead><tr><th>Data/Hora</th><th>Modo</th><th>Destino</th><th>Evento</th><th>Detalhe</th><th>Ação</th></tr></thead>
       <tbody id="logBody"></tbody></table>
     </div>
     <button id="genLogCsv" class="secondary">Baixar relatório (CSV)</button>
@@ -278,7 +278,10 @@ function addLogo(doc){
 }
 
 async function saveFile(filename, data, mime){
-  const blob = data instanceof Blob ? data : new Blob([data], {type:mime});
+  if(typeof data === "string" && mime === "text/csv"){
+    data = "\uFEFF" + data; // BOM: Excel entende acentos corretamente
+  }
+  const blob = data instanceof Blob ? data : new Blob([data], {type:mime + (mime==="text/csv" ? ";charset=utf-8" : "")});
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if(isIOS){
     // iOS Safari não suporta forçar download; abre numa aba para o usuário usar "Compartilhar" > "Salvar em Arquivos"
@@ -312,7 +315,7 @@ async function loadAll(){
   }
   const { data: mov } = await sb.from("movimentacao").select("*").order("criado_em", {ascending:false}).limit(5000);
   log = (mov||[]).map(m=>({
-    ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe,
+    id:m.id, ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe,
     modo:m.modo, codigo:m.codigo, descricao:m.descricao, origemBase:m.origem_base
   }));
   render();
@@ -608,16 +611,41 @@ function filtrarLogPorData(entries){
 function renderLog(){
   const body = document.getElementById("logBody");
   const filtrados = filtrarLogPorData(log).sort((a,b)=>b.ts-a.ts);
-  body.innerHTML = filtrados.map(e=>`<tr><td>${fmtTs(e.ts)}</td><td>${modoLabel(e.modo)}</td><td>${e.base}</td><td>${eventoLabel(e.tipo)}</td><td>${e.detalhe||"-"}</td></tr>`).join("")
-    || `<tr><td colspan="5" class="empty">Nenhuma movimentação no período.</td></tr>`;
+  body.innerHTML = filtrados.map(e=>`<tr><td>${fmtTs(e.ts)}</td><td>${modoLabel(e.modo)}</td><td>${e.base}</td><td>${eventoLabel(e.tipo)}</td><td>${e.detalhe||"-"}</td><td>${e.tipo==="leitura" ? `<span class="del" data-cancelar="${e.id}">cancelar</span>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">Nenhuma movimentação no período.</td></tr>`;
+  body.querySelectorAll("[data-cancelar]").forEach(el=>{
+    el.onclick = ()=> cancelarLeitura(Number(el.dataset.cancelar));
+  });
 }
 document.getElementById("logFiltroDe").onchange = renderLog;
 document.getElementById("logFiltroAte").onchange = renderLog;
 document.getElementById("logFiltroCodigo").addEventListener("input", renderLog);
+
+const SENHA_SUPERVISOR = "580539";
+async function cancelarLeitura(id){
+  const entrada = log.find(e=>e.id===id);
+  if(!entrada) return;
+  const senha = prompt(`Cancelar a leitura da mala ${entrada.codigo} (${entrada.base}, ${fmtTs(entrada.ts)}) exige autorização do supervisor.\n\nDigite a senha do supervisor:`);
+  if(senha === null) return;
+  if(senha !== SENHA_SUPERVISOR){
+    alert("Senha incorreta. Cancelamento não realizado.");
+    return;
+  }
+
+  await sb.from("movimentacao").delete().eq("id", id);
+  log = log.filter(e=>e.id!==id);
+
+  const g = groups[entrada.base];
+  if(g){
+    g.malas = g.malas.filter(m=>m.codigo!==entrada.codigo);
+    await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", entrada.codigo);
+  }
+  render();
+}
 document.getElementById("genLogCsv").onclick = async ()=>{
   const rows=[["Data/Hora","Modo","Destino","Evento","Detalhe"]];
   filtrarLogPorData(log).sort((a,b)=>a.ts-b.ts).forEach(e=>rows.push([fmtTs(e.ts), modoLabel(e.modo), e.base, eventoLabel(e.tipo), e.detalhe||"-"]));
-  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
   await saveFile("relatorio-movimentacao.csv", csv, "text/csv");
 };
 
@@ -694,7 +722,7 @@ document.getElementById("genCsv").onclick = async ()=>{
       rows.push([g.numero, isDevolucao?"Devolução":"Embarque", isDevolucao?(m.origemBase||""):origem, isDevolucao?"Matriz":destino, responsavel, g.lacre, m.codigo, m.desc]);
     });
   });
-  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
   await saveFile("romaneios.csv", csv, "text/csv");
 };
 
@@ -836,7 +864,7 @@ document.getElementById("genEmbarqueCsv").onclick = async ()=>{
   const itens = coletarEmbarquePorPeriodo(baseSelecionada, de, ate, horaDe, horaAte);
   const rows = [["Romaneio","Destino","Código da mala","Cliente","Lacre","Data/Hora"]];
   itens.forEach(it=>rows.push([it.romaneio, it.destino, it.codigo, it.desc, it.lacre, fmtTs(it.ts)]));
-  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
   await saveFile("romaneio-entrega-filial.csv", csv, "text/csv");
 };
 
@@ -911,7 +939,7 @@ document.getElementById("genDevolucaoCsv").onclick = async ()=>{
   const itens = coletarDevolucaoPorPeriodo(de, ate, horaDe, horaAte);
   const rows = [["Romaneio","Origem","Código da mala","Cliente","Lacre","Data/Hora"]];
   itens.forEach(it=>rows.push([it.romaneio, it.base, it.codigo, it.desc, it.lacre, fmtTs(it.ts)]));
-  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(";")).join("\n");
   await saveFile("romaneio-devolucao-matriz.csv", csv, "text/csv");
 };
 
