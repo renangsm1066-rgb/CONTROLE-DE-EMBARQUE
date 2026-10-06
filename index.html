@@ -98,6 +98,7 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </nav>
   <div class="content wrap">
 <section id="page-leitura" class="page active">
+<div id="busyIndicator" style="display:none;position:fixed;top:10px;right:10px;z-index:200;background:var(--accent);color:var(--accent-ink);padding:6px 12px;border-radius:20px;font-size:.8rem;box-shadow:0 2px 6px rgba(0,0,0,.2)">Salvando...</div>
 <div class="card" id="summaryCard">
     <div class="row" style="text-align:center">
       <div><div style="font-size:1.4rem;font-weight:600" id="sumMalas">0</div><div class="hint">Malas lidas</div></div>
@@ -414,6 +415,8 @@ scanInput.addEventListener("keydown", async e=>{
   const codigo = scanInput.value.trim();
   scanInput.value = "";
   if(!codigo) return;
+  beginBusy();
+  try{
 
   const { data: hit } = await sb.from("malas_base").select("base,descricao").eq("codigo", codigo).maybeSingle();
   if(!hit){
@@ -433,6 +436,12 @@ scanInput.addEventListener("keydown", async e=>{
     }
     scanFeedback.classList.remove("warn");
     const destinoKey = "Lote " + activeLote;
+    const outroLote = Object.entries(groups).find(([k,gr])=> gr.modo==="devolucao" && k!==destinoKey && gr.malas.some(m=>m.codigo===codigo));
+    if(outroLote){
+      beep(180,350);
+      setFeedback(`Mala ${codigo} já foi lida no lote "${outroLote[1].lacre||outroLote[0]}". Não registrada de novo.`, "bad");
+      return;
+    }
     const g = await getOrCreateRomaneio(mode, destinoKey, null, responsavel, activeLote);
     if(!g) return;
     if(g.finalizado){
@@ -484,6 +493,7 @@ scanInput.addEventListener("keydown", async e=>{
   await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
   setFeedback(`Mala ${codigo} → ${base}.`, "ok");
   render();
+  } finally { endBusy(); }
 });
 
 // ---------- Renderização ----------
@@ -496,51 +506,76 @@ function updateSummary(){
   document.getElementById("sumPendentes").textContent = pendentes;
 }
 
+let busyCount = 0;
+function beginBusy(){ busyCount++; document.getElementById("busyIndicator").style.display = "block"; }
+function endBusy(){ busyCount = Math.max(0, busyCount-1); if(busyCount===0) document.getElementById("busyIndicator").style.display = "none"; }
+
 async function setLacre(destino, lacre){
-  const g = groups[destino];
-  g.lacre = lacre;
-  await sb.from("romaneios").update({lacre}).eq("id", g.id);
-  await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`);
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.lacre = lacre;
+    await sb.from("romaneios").update({lacre}).eq("id", g.id);
+    await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`);
+  } finally { endBusy(); }
 }
 async function setNumero(destino, numero){
-  const g = groups[destino];
-  g.numero = numero;
-  await sb.from("romaneios").update({numero}).eq("id", g.id);
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.numero = numero;
+    await sb.from("romaneios").update({numero}).eq("id", g.id);
+  } finally { endBusy(); }
 }
 async function setFoto(destino, dataUrl){
-  const g = groups[destino];
-  g.foto = dataUrl;
-  await sb.from("romaneios").update({foto_url: dataUrl}).eq("id", g.id);
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.foto = dataUrl;
+    await sb.from("romaneios").update({foto_url: dataUrl}).eq("id", g.id);
+  } finally { endBusy(); }
 }
 async function finalizarGrupo(destino){
-  const g = groups[destino];
-  g.finalizado = true; g.finalizadoEm = Date.now();
-  await sb.from("romaneios").update({finalizado:true, finalizado_em: new Date().toISOString()}).eq("id", g.id);
-  if(activeDestino===destino) activeDestino=null;
-  if(activeLote && destino==="Lote "+activeLote){ activeLote=null; document.getElementById("loteLacreInput").value=""; }
-  await logEvent("finalizacao", destino, "");
-  render();
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.finalizado = true; g.finalizadoEm = Date.now();
+    await sb.from("romaneios").update({finalizado:true, finalizado_em: new Date().toISOString()}).eq("id", g.id);
+    if(activeDestino===destino) activeDestino=null;
+    if(activeLote && destino==="Lote "+activeLote){ activeLote=null; document.getElementById("loteLacreInput").value=""; }
+    await logEvent("finalizacao", destino, "");
+    render();
+  } finally { endBusy(); }
 }
 async function reabrirGrupo(destino){
-  const g = groups[destino];
-  g.finalizado = false; g.finalizadoEm = null;
-  await sb.from("romaneios").update({finalizado:false, finalizado_em:null}).eq("id", g.id);
-  await logEvent("reabertura", destino, "");
-  render();
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.finalizado = false; g.finalizadoEm = null;
+    await sb.from("romaneios").update({finalizado:false, finalizado_em:null}).eq("id", g.id);
+    await logEvent("reabertura", destino, "");
+    render();
+  } finally { endBusy(); }
 }
 async function removerMala(destino, codigo){
-  const g = groups[destino];
-  const mala = g.malas.find(m=>m.codigo===codigo);
-  g.malas = g.malas.filter(m=>m.codigo!==codigo);
-  await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", codigo);
-  render();
+  beginBusy();
+  try{
+    const g = groups[destino];
+    g.malas = g.malas.filter(m=>m.codigo!==codigo);
+    await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", codigo);
+    render();
+  } finally { endBusy(); }
 }
 async function removerGrupo(destino){
   const g = groups[destino];
-  await sb.from("romaneios").delete().eq("id", g.id);
-  delete groups[destino];
-  if(activeDestino===destino) activeDestino=null;
-  render();
+  if(!confirm(`Excluir o grupo "${destino}" com ${g.malas.length} malas?\n\nEssa ação apaga o romaneio e as leituras dele. Não pode ser desfeita.`)) return;
+  beginBusy();
+  try{
+    await sb.from("romaneios").delete().eq("id", g.id);
+    delete groups[destino];
+    if(activeDestino===destino) activeDestino=null;
+    render();
+  } finally { endBusy(); }
 }
 
 const groupsWrap = document.getElementById("groupsWrap");
@@ -632,15 +667,18 @@ async function cancelarLeitura(id){
     return;
   }
 
-  await sb.from("movimentacao").delete().eq("id", id);
-  log = log.filter(e=>e.id!==id);
+  beginBusy();
+  try{
+    await sb.from("movimentacao").delete().eq("id", id);
+    log = log.filter(e=>e.id!==id);
 
-  const g = groups[entrada.base];
-  if(g){
-    g.malas = g.malas.filter(m=>m.codigo!==entrada.codigo);
-    await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", entrada.codigo);
-  }
-  render();
+    const g = groups[entrada.base];
+    if(g){
+      g.malas = g.malas.filter(m=>m.codigo!==entrada.codigo);
+      await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", entrada.codigo);
+    }
+    render();
+  } finally { endBusy(); }
 }
 document.getElementById("genLogCsv").onclick = async ()=>{
   const rows=[["Data/Hora","Modo","Destino","Evento","Detalhe"]];
@@ -987,6 +1025,17 @@ document.querySelectorAll('.nav-btn[data-page]').forEach(btn=>{
     document.getElementById('page-'+btn.dataset.page).classList.add('active');
   };
 });
+
+let realtimeTimer = null;
+function agendarRecarga(){
+  clearTimeout(realtimeTimer);
+  realtimeTimer = setTimeout(()=>{ loadAll(); }, 1200);
+}
+sb.channel("app-mudancas")
+  .on("postgres_changes", {event:"*", schema:"public", table:"romaneios"}, agendarRecarga)
+  .on("postgres_changes", {event:"*", schema:"public", table:"leituras"}, agendarRecarga)
+  .on("postgres_changes", {event:"*", schema:"public", table:"movimentacao"}, agendarRecarga)
+  .subscribe();
 
 loadAll();
 </script>
