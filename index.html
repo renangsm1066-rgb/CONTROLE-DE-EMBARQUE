@@ -516,7 +516,7 @@ async function setLacre(destino, lacre){
     const g = groups[destino];
     g.lacre = lacre;
     await sb.from("romaneios").update({lacre}).eq("id", g.id);
-    await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`);
+    await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`, {modo:g.modo});
   } finally { endBusy(); }
 }
 async function setNumero(destino, numero){
@@ -536,24 +536,26 @@ async function setFoto(destino, dataUrl){
   } finally { endBusy(); }
 }
 async function finalizarGrupo(destino){
+  const g = groups[destino];
+  if(!g || g.finalizado) return;
   beginBusy();
   try{
-    const g = groups[destino];
     g.finalizado = true; g.finalizadoEm = Date.now();
     await sb.from("romaneios").update({finalizado:true, finalizado_em: new Date().toISOString()}).eq("id", g.id);
     if(activeDestino===destino) activeDestino=null;
     if(activeLote && destino==="Lote "+activeLote){ activeLote=null; document.getElementById("loteLacreInput").value=""; }
-    await logEvent("finalizacao", destino, "");
+    await logEvent("finalizacao", destino, "", {modo:g.modo});
     render();
   } finally { endBusy(); }
 }
 async function reabrirGrupo(destino){
+  const g = groups[destino];
+  if(!g || !g.finalizado) return;
   beginBusy();
   try{
-    const g = groups[destino];
     g.finalizado = false; g.finalizadoEm = null;
     await sb.from("romaneios").update({finalizado:false, finalizado_em:null}).eq("id", g.id);
-    await logEvent("reabertura", destino, "");
+    await logEvent("reabertura", destino, "", {modo:g.modo});
     render();
   } finally { endBusy(); }
 }
@@ -610,7 +612,14 @@ function renderGroups(){
   groupsWrap.querySelectorAll("[data-resume]").forEach(el=>{ el.onclick=()=>{ activeDestino=el.dataset.resume; renderDestinoInfo(); }; });
   groupsWrap.querySelectorAll("[data-numero]").forEach(el=>{ el.onchange=()=>setNumero(el.dataset.numero, el.value); });
   groupsWrap.querySelectorAll("[data-lacre]").forEach(el=>{ el.onchange=()=>{ setLacre(el.dataset.lacre, el.value).then(renderLog); }; });
-  groupsWrap.querySelectorAll("[data-finalizar]").forEach(el=>{ el.onclick=()=>finalizarGrupo(el.dataset.finalizar); });
+  groupsWrap.querySelectorAll("[data-finalizar]").forEach(el=>{
+    el.onclick=()=>{
+      if(el.disabled) return;
+      el.disabled = true;
+      el.textContent = "Finalizando...";
+      finalizarGrupo(el.dataset.finalizar);
+    };
+  });
   groupsWrap.querySelectorAll("[data-reabrir]").forEach(el=>{ el.onclick=()=>reabrirGrupo(el.dataset.reabrir); });
   groupsWrap.querySelectorAll("[data-foto]").forEach(el=>{
     el.onchange = ()=>{
