@@ -436,7 +436,7 @@ scanInput.addEventListener("keydown", async e=>{
     }
     scanFeedback.classList.remove("warn");
     const destinoKey = "Lote " + activeLote;
-    const outroLote = Object.entries(groups).find(([k,gr])=> gr.modo==="devolucao" && k!==destinoKey && gr.malas.some(m=>m.codigo===codigo));
+    const outroLote = Object.entries(groups).find(([k,gr])=> gr.modo==="devolucao" && !gr.finalizado && k!==destinoKey && gr.malas.some(m=>m.codigo===codigo));
     if(outroLote){
       beep(180,350);
       setFeedback(`Mala ${codigo} já foi lida no lote "${outroLote[1].lacre||outroLote[0]}". Não registrada de novo.`, "bad");
