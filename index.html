@@ -1180,7 +1180,10 @@ document.querySelectorAll('.nav-btn[data-page]').forEach(btn=>{
 let realtimeTimer = null;
 function agendarRecarga(){
   clearTimeout(realtimeTimer);
-  realtimeTimer = setTimeout(()=>{ loadAll(); }, 1200);
+  realtimeTimer = setTimeout(()=>{
+    if(busyCount>0){ agendarRecarga(); return; } // ação local em andamento: espera terminar antes de recarregar
+    loadAll();
+  }, 1200);
 }
 sb.channel("app-mudancas")
   .on("postgres_changes", {event:"*", schema:"public", table:"romaneios"}, agendarRecarga)
@@ -1190,7 +1193,7 @@ sb.channel("app-mudancas")
 
 let sincronizando = false;
 async function sincronizarFila(){
-  if(sincronizando || !navigator.onLine || filaOffline.length===0) return;
+  if(sincronizando || busyCount>0 || !navigator.onLine || filaOffline.length===0) return;
   sincronizando = true;
   const pendentes = filaOffline;
   filaOffline = [];
