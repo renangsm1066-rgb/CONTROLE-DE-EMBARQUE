@@ -144,14 +144,6 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </div>
 <div id="groupsWrap"></div>
 
-<div class="card">
-  <strong>Lotes finalizados hoje</strong>
-  <div class="hint">Lotes concluídos no dia de hoje. Reabra se precisar corrigir algo.</div>
-  <div class="tblwrap" style="max-height:200px">
-    <table><thead><tr><th>Lote/Destino</th><th>Malas</th><th>Finalizado às</th><th></th></tr></thead>
-    <tbody id="finalizadosHojeBody"></tbody></table>
-  </div>
-</div>
   <div class="card actions">
     <button id="genPdf">Gerar romaneios (PDF)</button>
     <button id="genCsv" class="secondary">Baixar CSV das malas</button>
@@ -198,6 +190,14 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
   </div>
 </section>
 <section id="page-relatorio" class="page">
+<div class="card">
+  <strong>Lotes finalizados hoje</strong>
+  <div class="hint">Lotes concluídos no dia de hoje. Reabra se precisar corrigir algo.</div>
+  <div class="tblwrap" style="max-height:200px">
+    <table><thead><tr><th>Lote/Destino</th><th>Malas</th><th>Finalizado às</th><th></th></tr></thead>
+    <tbody id="finalizadosHojeBody"></tbody></table>
+  </div>
+</div>
 <div class="card">
     <strong>Relatório de movimentação</strong>
     <div class="hint">Histórico de leituras e alterações de lacre, com data e horário, por destino.</div>
