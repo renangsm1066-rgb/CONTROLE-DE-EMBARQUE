@@ -705,6 +705,9 @@ async function removerMala(destino, codigo){
     const g = groups[destino];
     g.malas = g.malas.filter(m=>m.codigo!==codigo);
     await sb.from("leituras").delete().eq("romaneio_id", g.id).eq("codigo", codigo);
+    const antes = filaOffline.length;
+    filaOffline = filaOffline.filter(it=> !(it.destinoKey===destino && it.codigo===codigo));
+    if(filaOffline.length!==antes) persistirFila();
     render();
   } finally { endBusy(); }
 }
@@ -713,9 +716,12 @@ async function removerGrupo(destino){
   if(!confirm(`Excluir o grupo "${destino}" com ${g.malas.length} malas?\n\nEssa ação apaga o romaneio e as leituras dele. Não pode ser desfeita.`)) return;
   beginBusy();
   try{
-    await sb.from("romaneios").delete().eq("id", g.id);
+    if(!g.offlinePendente) await sb.from("romaneios").delete().eq("id", g.id);
     delete groups[destino];
     if(activeDestino===destino) activeDestino=null;
+    const antes = filaOffline.length;
+    filaOffline = filaOffline.filter(it=> it.destinoKey!==destino);
+    if(filaOffline.length!==antes) persistirFila();
     render();
   } finally { endBusy(); }
 }
