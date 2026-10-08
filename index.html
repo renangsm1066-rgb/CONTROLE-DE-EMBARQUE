@@ -127,6 +127,7 @@ th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
 <div id="leituraFlow" style="display:none">
 <div class="card">
     <strong>Leitura das malas</strong>
+    <div id="filaOfflineBadge" class="status-banner" style="display:none;background:#fff4e5;color:#8a5a00;border-color:#f0d9a6"></div>
     <div id="destinoAtivoInfo" class="status-banner"></div>
     <div id="loteDevolucaoBox" style="display:none">
       <label>Lacre do lote atual (Devolução Matriz)</label>
@@ -310,10 +311,46 @@ async function saveFile(filename, data, mime){
 }
 
 // ---------- Carregar dados do Supabase ----------
+let filaOffline = [];
+try{ filaOffline = JSON.parse(localStorage.getItem("fila_offline") || "[]"); }catch(e){ filaOffline = []; }
+function persistirFila(){ localStorage.setItem("fila_offline", JSON.stringify(filaOffline)); atualizarBadgeFila(); }
+function atualizarBadgeFila(){
+  const el = document.getElementById("filaOfflineBadge");
+  if(!el) return;
+  if(filaOffline.length>0){
+    el.style.display = "block";
+    el.textContent = `📶 ${filaOffline.length} leitura(s) aguardando conexão para sincronizar.`;
+  } else {
+    el.style.display = "none";
+  }
+}
+
+let malasBaseCache = {};
+try{ malasBaseCache = JSON.parse(localStorage.getItem("malas_base_cache") || "{}"); }catch(e){ malasBaseCache = {}; }
+
+async function atualizarCacheMalasBase(){
+  try{
+    let desde = 0;
+    const tudo = {};
+    while(true){
+      const { data, error } = await sb.from("malas_base").select("codigo,base,descricao").range(desde, desde+999);
+      if(error || !data || data.length===0) break;
+      data.forEach(r=>{ tudo[r.codigo] = {base:r.base, descricao:r.descricao}; });
+      if(data.length < 1000) break;
+      desde += 1000;
+    }
+    if(Object.keys(tudo).length>0){
+      malasBaseCache = tudo;
+      localStorage.setItem("malas_base_cache", JSON.stringify(malasBaseCache));
+    }
+  }catch(e){ /* mantém o cache antigo se der erro */ }
+}
+
 async function loadAll(){
   const { count } = await sb.from("malas_base").select("*", {count:"exact", head:true});
   malasBaseCount = count || 0;
   document.getElementById("baseInfo").textContent = `${malasBaseCount} códigos carregados no Supabase.`;
+  atualizarCacheMalasBase();
 
   const { data: romaneios } = await sb.from("romaneios").select("*").order("criado_em", {ascending:true});
   groups = {};
@@ -340,13 +377,22 @@ async function logEvent(tipo, destino, detalhe, extra){
 }
 
 async function getOrCreateRomaneio(modo, destino, origem, responsavel, lacreInicial){
-  if(groups[destino] && !groups[destino].finalizado) return groups[destino];
-  const numero = romaneioNumero(destino);
-  const { data, error } = await sb.from("romaneios").insert({
-    numero, modo, destino, origem: origem||null, responsavel: responsavel||null, lacre: lacreInicial||"", finalizado:false
-  }).select().single();
-  if(error){ alert("Erro ao criar romaneio: "+error.message); return null; }
-  groups[destino] = { id:data.id, numero:data.numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:[] };
+  const existente = groups[destino];
+  if(existente && !existente.finalizado && !existente.offlinePendente) return existente;
+  const numero = existente ? existente.numero : romaneioNumero(destino);
+  try{
+    if(!navigator.onLine) throw new Error("offline");
+    const { data, error } = await sb.from("romaneios").insert({
+      numero, modo, destino, origem: origem||null, responsavel: responsavel||null, lacre: lacreInicial||"", finalizado:false
+    }).select().single();
+    if(error) throw error;
+    const malasExistentes = existente ? existente.malas : [];
+    groups[destino] = { id:data.id, numero:data.numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:malasExistentes };
+  }catch(e){
+    if(!existente){
+      groups[destino] = { id:"offline-"+Date.now()+"-"+Math.random().toString(36).slice(2), numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:[], offlinePendente:true };
+    }
+  }
   return groups[destino];
 }
 
@@ -430,7 +476,15 @@ async function processarCodigo(codigoBruto){
   beginBusy();
   try{
 
-  const { data: hit } = await sb.from("malas_base").select("base,descricao").eq("codigo", codigo).maybeSingle();
+  let hit = null;
+  try{
+    if(!navigator.onLine) throw new Error("offline");
+    const resp = await sb.from("malas_base").select("base,descricao").eq("codigo", codigo).maybeSingle();
+    if(resp.error) throw resp.error;
+    hit = resp.data;
+  }catch(e){
+    hit = malasBaseCache[codigo] || null; // sem internet: usa a cópia salva no aparelho
+  }
   if(!hit){
     beep(220,260);
     setFeedback(`Código "${codigo}" não encontrado na base.`, "bad");
@@ -467,10 +521,17 @@ async function processarCodigo(codigoBruto){
       return;
     }
     beep(1200,90);
-    await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base});
     g.malas.push({codigo, desc, origemBase:base, ts: Date.now()});
-    await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
-    setFeedback(`Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`, "ok");
+    try{
+      if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
+      await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base});
+      await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
+      setFeedback(`Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`, "ok");
+    }catch(e){
+      filaOffline.push({modo:"devolucao", destinoKey, codigo, desc, origemBase:base, origem:null, responsavel, lacreInicial:activeLote});
+      persistirFila();
+      setFeedback(`📶 Sem conexão: mala ${codigo} guardada (${filaOffline.length} na fila). Será enviada quando a internet voltar.`, "bad");
+    }
     render();
     return;
   }
@@ -500,10 +561,17 @@ async function processarCodigo(codigoBruto){
     return;
   }
   beep(1200,90);
-  await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null});
   g.malas.push({codigo, desc, origemBase:null, ts: Date.now()});
-  await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
-  setFeedback(`Mala ${codigo} → ${base}.`, "ok");
+  try{
+    if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
+    await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null});
+    await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
+    setFeedback(`Mala ${codigo} → ${base}.`, "ok");
+  }catch(e){
+    filaOffline.push({modo:"embarque", destinoKey, codigo, desc, origemBase:null, origem, responsavel, lacreInicial:null});
+    persistirFila();
+    setFeedback(`📶 Sem conexão: mala ${codigo} guardada (${filaOffline.length} na fila). Será enviada quando a internet voltar.`, "bad");
+  }
   render();
   } finally { endBusy(); processandoCodigo = false; }
 }
@@ -788,7 +856,7 @@ function renderFinalizadosHoje(){
   });
 }
 
-function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderFinalizadosHoje(); renderLog(); popularSelectBases(); }
+function render(){ updateSummary(); renderDestinoInfo(); renderGroups(); renderFinalizadosHoje(); renderLog(); popularSelectBases(); atualizarBadgeFila(); }
 
 // ---------- PDF / CSV das malas ----------
 document.getElementById("genPdf").onclick = async ()=>{
@@ -1120,7 +1188,33 @@ sb.channel("app-mudancas")
   .on("postgres_changes", {event:"*", schema:"public", table:"movimentacao"}, agendarRecarga)
   .subscribe();
 
+let sincronizando = false;
+async function sincronizarFila(){
+  if(sincronizando || !navigator.onLine || filaOffline.length===0) return;
+  sincronizando = true;
+  const pendentes = filaOffline;
+  filaOffline = [];
+  persistirFila();
+  for(const item of pendentes){
+    try{
+      const g = await getOrCreateRomaneio(item.modo, item.destinoKey, item.origem, item.responsavel, item.lacreInicial);
+      if(!g || g.offlinePendente) throw new Error("ainda offline");
+      await sb.from("leituras").insert({romaneio_id:g.id, codigo:item.codigo, descricao:item.desc, origem_base:item.origemBase});
+      const detalheOrig = item.origemBase ? `${item.codigo} — ${item.desc} (origem: ${item.origemBase})` : `${item.codigo} — ${item.desc}`;
+      await logEvent("leitura", item.destinoKey, detalheOrig, {modo:item.modo, codigo:item.codigo, descricao:item.desc, origemBase:item.origemBase});
+    }catch(e){
+      filaOffline.push(item);
+      persistirFila();
+    }
+  }
+  render();
+  sincronizando = false;
+}
+window.addEventListener("online", sincronizarFila);
+setInterval(sincronizarFila, 20000);
+
 loadAll();
+sincronizarFila();
 </script>
 </body>
 </html>
