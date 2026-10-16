@@ -362,6 +362,18 @@ async function loadAll(){
       malas: (leituras||[]).map(l=>({codigo:l.codigo, desc:l.descricao, origemBase:l.origem_base, ts: new Date(l.criado_em).getTime()}))
     };
   }
+  // reaplica leituras que ainda não foram confirmadas no banco (fila offline),
+  // para não sumirem da tela nem permitir ler a mesma mala de novo por engano
+  filaOffline.forEach(item=>{
+    let g = groups[item.destinoKey];
+    if(!g){
+      g = { id:"offline-"+Date.now()+"-"+Math.random().toString(36).slice(2), numero: romaneioNumero(item.destinoKey), modo:item.modo, lacre:item.lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:[], offlinePendente:true };
+      groups[item.destinoKey] = g;
+    }
+    if(!g.malas.some(m=>m.codigo===item.codigo)){
+      g.malas.push({codigo:item.codigo, desc:item.desc, origemBase:item.origemBase, ts: Date.now()});
+    }
+  });
   const { data: mov } = await sb.from("movimentacao").select("*").order("criado_em", {ascending:false}).limit(5000);
   log = (mov||[]).map(m=>({
     id:m.id, ts: new Date(m.criado_em).getTime(), tipo:m.tipo, base:m.destino, detalhe:m.detalhe,
@@ -379,18 +391,19 @@ async function logEvent(tipo, destino, detalhe, extra){
 async function getOrCreateRomaneio(modo, destino, origem, responsavel, lacreInicial){
   const existente = groups[destino];
   if(existente && !existente.finalizado && !existente.offlinePendente) return existente;
-  const numero = existente ? existente.numero : romaneioNumero(destino);
+  const precisaLoteNovo = !existente || existente.finalizado; // lote anterior finalizado = começa um novo, com número novo
+  const numero = precisaLoteNovo ? romaneioNumero(destino) : existente.numero;
+  const malasBase = precisaLoteNovo ? [] : existente.malas;
   try{
     if(!navigator.onLine) throw new Error("offline");
     const { data, error } = await sb.from("romaneios").insert({
       numero, modo, destino, origem: origem||null, responsavel: responsavel||null, lacre: lacreInicial||"", finalizado:false
     }).select().single();
     if(error) throw error;
-    const malasExistentes = existente ? existente.malas : [];
-    groups[destino] = { id:data.id, numero:data.numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:malasExistentes };
+    groups[destino] = { id:data.id, numero:data.numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:malasBase };
   }catch(e){
-    if(!existente){
-      groups[destino] = { id:"offline-"+Date.now()+"-"+Math.random().toString(36).slice(2), numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:[], offlinePendente:true };
+    if(precisaLoteNovo){
+      groups[destino] = { id:"offline-"+Date.now()+"-"+Math.random().toString(36).slice(2), numero, modo, lacre:lacreInicial||"", foto:"", finalizado:false, finalizadoEm:null, malas:malasBase, offlinePendente:true };
     }
   }
   return groups[destino];
