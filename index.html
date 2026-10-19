@@ -384,7 +384,8 @@ async function loadAll(){
 
 async function logEvent(tipo, destino, detalhe, extra){
   extra = extra || {};
-  await sb.from("movimentacao").insert({tipo, destino, detalhe, modo:extra.modo||null, codigo:extra.codigo||null, descricao:extra.descricao||null, origem_base:extra.origemBase||null});
+  const { error } = await sb.from("movimentacao").insert({tipo, destino, detalhe, modo:extra.modo||null, codigo:extra.codigo||null, descricao:extra.descricao||null, origem_base:extra.origemBase||null});
+  if(error) throw error;
   log.unshift({ts: Date.now(), tipo, base:destino, detalhe, modo:extra.modo||null, codigo:extra.codigo||null, descricao:extra.descricao||null, origemBase:extra.origemBase||null});
 }
 
@@ -537,7 +538,8 @@ async function processarCodigo(codigoBruto){
     g.malas.push({codigo, desc, origemBase:base, ts: Date.now()});
     try{
       if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
-      await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+      const { error: errLeitura1 } = await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+      if(errLeitura1) throw errLeitura1;
       await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
       setFeedback(`Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`, "ok");
     }catch(e){
@@ -577,7 +579,8 @@ async function processarCodigo(codigoBruto){
   g.malas.push({codigo, desc, origemBase:null, ts: Date.now()});
   try{
     if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
-    await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+    const { error: errLeitura2 } = await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+    if(errLeitura2) throw errLeitura2;
     await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
     setFeedback(`Mala ${codigo} → ${base}.`, "ok");
   }catch(e){
@@ -669,7 +672,7 @@ async function setLacre(destino, lacre){
     const g = groups[destino];
     g.lacre = lacre;
     await sb.from("romaneios").update({lacre}).eq("id", g.id);
-    await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`, {modo:g.modo});
+    try{ await logEvent("lacre", destino, `Lacre definido: ${lacre||"-"}`, {modo:g.modo}); }catch(e){ console.error("Falha ao registrar no relatório:", e); }
   } finally { endBusy(); }
 }
 async function setNumero(destino, numero){
@@ -697,7 +700,7 @@ async function finalizarGrupo(destino){
     await sb.from("romaneios").update({finalizado:true, finalizado_em: new Date().toISOString()}).eq("id", g.id);
     if(activeDestino===destino) activeDestino=null;
     if(activeLote && destino==="Lote "+activeLote){ activeLote=null; document.getElementById("loteLacreInput").value=""; }
-    await logEvent("finalizacao", destino, "", {modo:g.modo});
+    try{ await logEvent("finalizacao", destino, "", {modo:g.modo}); }catch(e){ console.error("Falha ao registrar no relatório:", e); }
     render();
   } finally { endBusy(); }
 }
@@ -708,7 +711,7 @@ async function reabrirGrupo(destino){
   try{
     g.finalizado = false; g.finalizadoEm = null;
     await sb.from("romaneios").update({finalizado:false, finalizado_em:null}).eq("id", g.id);
-    await logEvent("reabertura", destino, "", {modo:g.modo});
+    try{ await logEvent("reabertura", destino, "", {modo:g.modo}); }catch(e){ console.error("Falha ao registrar no relatório:", e); }
     render();
   } finally { endBusy(); }
 }
@@ -1221,7 +1224,8 @@ async function sincronizarFila(){
     try{
       const g = await getOrCreateRomaneio(item.modo, item.destinoKey, item.origem, item.responsavel, item.lacreInicial);
       if(!g || g.offlinePendente) throw new Error("ainda offline");
-      await sb.from("leituras").upsert({romaneio_id:g.id, codigo:item.codigo, descricao:item.desc, origem_base:item.origemBase}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+      const { error: errLeitura3 } = await sb.from("leituras").upsert({romaneio_id:g.id, codigo:item.codigo, descricao:item.desc, origem_base:item.origemBase}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
+      if(errLeitura3) throw errLeitura3;
       const detalheOrig = item.origemBase ? `${item.codigo} — ${item.desc} (origem: ${item.origemBase})` : `${item.codigo} — ${item.desc}`;
       await logEvent("leitura", item.destinoKey, detalheOrig, {modo:item.modo, codigo:item.codigo, descricao:item.desc, origemBase:item.origemBase});
     }catch(e){
