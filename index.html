@@ -537,7 +537,7 @@ async function processarCodigo(codigoBruto){
     g.malas.push({codigo, desc, origemBase:base, ts: Date.now()});
     try{
       if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
-      await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base});
+      await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:base}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
       await logEvent("leitura", destinoKey, `${codigo} — ${desc} (origem: ${base})`, {modo:"devolucao", codigo, descricao:desc, origemBase:base});
       setFeedback(`Mala ${codigo} (origem: ${base}) → lote ${activeLote}.`, "ok");
     }catch(e){
@@ -577,7 +577,7 @@ async function processarCodigo(codigoBruto){
   g.malas.push({codigo, desc, origemBase:null, ts: Date.now()});
   try{
     if(!navigator.onLine || g.offlinePendente) throw new Error("offline");
-    await sb.from("leituras").insert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null});
+    await sb.from("leituras").upsert({romaneio_id:g.id, codigo, descricao:desc, origem_base:null}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
     await logEvent("leitura", destinoKey, `${codigo} — ${desc}`, {modo:"embarque", codigo, descricao:desc});
     setFeedback(`Mala ${codigo} → ${base}.`, "ok");
   }catch(e){
@@ -1221,7 +1221,7 @@ async function sincronizarFila(){
     try{
       const g = await getOrCreateRomaneio(item.modo, item.destinoKey, item.origem, item.responsavel, item.lacreInicial);
       if(!g || g.offlinePendente) throw new Error("ainda offline");
-      await sb.from("leituras").insert({romaneio_id:g.id, codigo:item.codigo, descricao:item.desc, origem_base:item.origemBase});
+      await sb.from("leituras").upsert({romaneio_id:g.id, codigo:item.codigo, descricao:item.desc, origem_base:item.origemBase}, {onConflict:"romaneio_id,codigo", ignoreDuplicates:true});
       const detalheOrig = item.origemBase ? `${item.codigo} — ${item.desc} (origem: ${item.origemBase})` : `${item.codigo} — ${item.desc}`;
       await logEvent("leitura", item.destinoKey, detalheOrig, {modo:item.modo, codigo:item.codigo, descricao:item.desc, origemBase:item.origemBase});
     }catch(e){
